@@ -27,7 +27,7 @@ gsthomepluginsdir=$(if $(XDG_DATA_HOME),$(XDG_DATA_HOME),$(HOME)/.local/share)/g
 gstsystempluginsdir=$(shell pkg-config --variable=pluginsdir gstreamer-1.0)
 gstpluginsdir?=$(if $(filter $(HOME)%,$(prefix)),$(gsthomepluginsdir),$(gstsystempluginsdir))
 
-VALA_PKGDEPS = gstreamer-1.0 gio-2.0 posix gio-unix-2.0
+VALA_PKGDEPS = gstreamer-1.0 gio-2.0 posix gio-unix-2.0 gio-2.0-workaround
 VALAFLAGS = $(patsubst %,--pkg %,$(VALA_PKGDEPS)) 
 
 # Generate version from 'git describe' when in git repository, and from
