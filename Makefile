@@ -93,12 +93,16 @@ sq = $(subst ','\'',$(1)) # function to escape single quotes (')
 	    echo '$(flags)' > $@; \
 	fi
 
-gst/gstpulsevideo.so : gst/gstsocketsrc.h gst/gstsocketsrc.c VERSION
+gst/gstpulsevideo.so : \
+		gst/gstpulsevideoplugin.c \
+		gst/gstsocketsrc.h \
+		gst/gstsocketsrc.c \
+		VERSION
 	@if ! pkg-config --exists $(PKG_DEPS); then \
 		printf "Please install packages $(PKG_DEPS)"; exit 1; fi
 	gcc -shared -o $@ $(filter %.c %.o,$^) -fPIC  -Wall -Werror $(CFLAGS) \
 		$(LDFLAGS) $$(pkg-config --libs --cflags $(PKG_DEPS)) \
-		-DVERSION=\"$(VERSION)\"
+		-DVERSION=\"$(VERSION)\" -DPACKAGE="\"pulsevideo\""
 
 .PHONY: all clean check dist doc install uninstall
 .PHONY: FORCE TAGS
