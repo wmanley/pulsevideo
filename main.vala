@@ -3,7 +3,7 @@ using Gst;
 using Posix;
 
 
-[DBus (name = "com.stb-tester.VideoSource1")]
+[DBus (name = "com.stbtester.VideoSource1")]
 public interface VideoSource1 : GLib.Object {
 
     public abstract string caps { owned get; }
@@ -49,14 +49,15 @@ void create_videosource(string source, GLib.DBusConnection dbus,
     // Creating pipeline and elements
     var caps = "video/x-raw,format=RGB,width=1280,height=720,framerate=30/1";
     var pipeline = (Gst.Pipeline) Gst.parse_launch(
-        source + " ! videoconvert ! " + caps + " ! multisocketsink name=sink");
+        source + " ! videoconvert ! " + caps + " ! progressreport ! multisocketsink name=sink");
 
     var sink = pipeline.get_by_name("sink");
 
     // Set pipeline state to PLAYING
     pipeline.set_state (State.PLAYING);
 
-    dbus.register_object(object_path, (VideoSource1) new VideoSource(caps, sink));
+    dbus.register_object(object_path,
+        (VideoSource1) new VideoSource(caps, sink));
 }
 
 int main (string[] args) {
@@ -66,13 +67,14 @@ int main (string[] args) {
     try {
         var dbus = GLib.Bus.get_sync (BusType.SESSION);
 
-        create_videosource("v4l2src", dbus, "/com/stb-tester/VideoSource");
+        create_videosource("v4l2src", dbus, "/com/stbtester/VideoSource");
 
-        uint32 request_name_result = (uint32) dbus.call_sync (
+        uint32 request_name_result = 0;
+        dbus.call_sync (
             "org.freedesktop.DBus", "/org/freedesktop/DBus",
             "org.freedesktop.DBus", "RequestName",
-            new Variant ("(su)", "com.stb-tester.VideoSource1", 0x4),
-            null, 0, -1);
+            new Variant ("(su)", "com.stbtester.VideoSource1", 0x4),
+            null, 0, -1).get("(u)", &request_name_result);
         if (request_name_result == 0) {
             GLib.stderr.printf ("Could not register name on DBus");
             return 1;
