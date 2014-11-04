@@ -53,7 +53,7 @@
 GST_DEBUG_CATEGORY_STATIC (socketsrc_debug);
 #define GST_CAT_DEFAULT socketsrc_debug
 
-#define MAX_READ_SIZE                   4 * 1024
+#define MAX_READ_SIZE                   4 * 1024 * 1024
 
 
 static GstStaticPadTemplate srctemplate = GST_STATIC_PAD_TEMPLATE ("src",
