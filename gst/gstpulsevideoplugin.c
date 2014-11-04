@@ -22,12 +22,16 @@
 #endif
 
 #include "gstsocketsrc.h"
+#include "gstdbusvideosourcesrc.h"
 
 static gboolean
 plugin_init (GstPlugin * plugin)
 {
-  return gst_element_register (plugin, "socketsrc", GST_RANK_NONE,
-          GST_TYPE_SOCKET_SRC);
+  return
+    gst_element_register (plugin, "socketsrc", GST_RANK_NONE,
+          GST_TYPE_SOCKET_SRC) &&
+    gst_element_register (plugin, "dbusvideosourcesrc", GST_RANK_NONE,
+          GST_TYPE_DBUS_VIDEOSOURCE_SRC);
 }
 
 GST_PLUGIN_DEFINE (GST_VERSION_MAJOR,

@@ -1,7 +1,7 @@
 # The default target of this Makefile is:
 all:
 
-PKG_DEPS=gstreamer-1.0 gstreamer-base-1.0 gio-2.0
+PKG_DEPS=gstreamer-1.0 gstreamer-base-1.0 gio-2.0 gio-unix-2.0 gstreamer-video-1.0
 
 prefix?=/usr/local
 exec_prefix?=$(prefix)
@@ -94,15 +94,27 @@ sq = $(subst ','\'',$(1)) # function to escape single quotes (')
 	fi
 
 gst/gstpulsevideo.so : \
+		gst/gstdbusvideosourcesrc.h \
+		gst/gstdbusvideosourcesrc.c \
 		gst/gstpulsevideoplugin.c \
 		gst/gstsocketsrc.h \
 		gst/gstsocketsrc.c \
+		gst/gstvideosource1.c \
+		gst/gstvideosource1.h \
 		VERSION
 	@if ! pkg-config --exists $(PKG_DEPS); then \
 		printf "Please install packages $(PKG_DEPS)"; exit 1; fi
 	gcc -shared -o $@ $(filter %.c %.o,$^) -fPIC  -Wall -Werror $(CFLAGS) \
 		$(LDFLAGS) $$(pkg-config --libs --cflags $(PKG_DEPS)) \
 		-DVERSION=\"$(VERSION)\" -DPACKAGE="\"pulsevideo\""
+
+gst/gstvideosource1.c gst/gstvideosource1.h : \
+		dbus-xml/com.stbtester.VideoSource1.xml
+	cd $(dir $@) && \
+	gdbus-codegen \
+		--generate-c-code $(basename $(notdir $@)) \
+		--interface-prefix=com.stbtester. \
+		--c-namespace Gst ../$<
 
 .PHONY: all clean check dist doc install uninstall
 .PHONY: FORCE TAGS
