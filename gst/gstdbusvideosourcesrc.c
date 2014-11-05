@@ -1,8 +1,5 @@
 /* GStreamer
- * Copyright (C) <1999> Erik Walthinsen <omega@cse.ogi.edu>
- * Copyright (C) <2004> Thomas Vander Stichele <thomas at apestaart dot org>
- * Copyright (C) <2011> Collabora Ltd.
- *     Author: Sebastian Dröge <sebastian.droege@collabora.co.uk>
+ * Copyright (C) <2014> William Manley <will@williammanley.net>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -175,8 +172,8 @@ gst_dbus_videosource_src_set_property (GObject * object, guint prop_id,
         GST_OBJECT_UNLOCK (src);
       }
       else
-        GST_WARNING_OBJECT (src, "Not setting property \"object-path\": \"%s\" is "
-            "not a valid object path", object_path);
+        GST_WARNING_OBJECT (src, "Not setting property \"object-path\": \"%s\" "
+            "is not a valid object path", object_path);
       g_free (object_path);
       break;
     }
@@ -267,20 +264,19 @@ gst_dbus_videosource_src_start (GstBaseSrc * bsrc)
   }
   caps = gst_caps_from_string (scaps);
   scaps = NULL;
-/*  if (!gst_base_src_set_caps (bsrc, caps)) {
+  if (!gst_base_src_set_caps (bsrc, caps)) {
     GST_ERROR_OBJECT (src, "Failed to set caps");
     goto done;
   }
-*/
+
   GST_INFO_OBJECT (src, "Received remote caps %" GST_PTR_FORMAT, caps);
   if (gst_video_info_from_caps (&video_info, caps)) {
     /* Best effort set the block size for raw video.  Really a proper parser or
      * payloading would be better.  Don't really care if it fails. */
     gst_base_src_set_blocksize (bsrc, video_info.size);
-    GST_WARNING_OBJECT (src, "So size is %u", (unsigned) video_info.size);
-
+    GST_DEBUG_OBJECT (src, "Buffer size is %u", (unsigned) video_info.size);
   } else {
-    GST_WARNING_OBJECT (src, "Which are incomplete");
+    GST_DEBUG_OBJECT (src, "Unknown buffer size");
   }
 
   gst_caps_unref (caps);
