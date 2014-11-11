@@ -49,7 +49,8 @@ void create_videosource(string source, GLib.DBusConnection dbus,
     // Creating pipeline and elements
     var caps = "video/x-raw,format=RGB,width=1280,height=720,framerate=30/1";
     var pipeline = (Gst.Pipeline) Gst.parse_launch(
-        source + " ! videoconvert ! " + caps + " ! progressreport ! multisocketsink name=sink");
+        source + " ! watchdog ! videoconvert ! " + caps
+        + " ! multisocketsink buffers-max=1 name=sink sync=false");
 
     var sink = pipeline.get_by_name("sink");
 
@@ -61,13 +62,35 @@ void create_videosource(string source, GLib.DBusConnection dbus,
 }
 
 int main (string[] args) {
+    string? source_pipeline = null;
+    GLib.OptionEntry[] options = {
+        GLib.OptionEntry () {
+            long_name = "source-pipeline", short_name = 0, flags = 0,
+            arg = OptionArg.STRING, arg_data = &source_pipeline,
+            description = "GStreamer pipeline to use as video source",
+            arg_description = "SOURCE PIPELINE" },
+        GLib.OptionEntry ()
+    };
+
+    try {
+        var opt_context = new OptionContext (null);
+        opt_context.set_help_enabled (true);
+        opt_context.add_main_entries (options, null);
+        opt_context.parse (ref args);
+    } catch (OptionError e) {
+        GLib.stderr.printf ("error: %s\n", e.message);
+        GLib.stderr.printf ("Run '%s --help' to see a full list of available " +
+                       "command line options.\n", args[0]);
+        return 1;
+    }
+
     // Initializing GStreamer
     Gst.init (ref args);
 
     try {
         var dbus = GLib.Bus.get_sync (BusType.SESSION);
 
-        create_videosource("v4l2src", dbus, "/com/stbtester/VideoSource");
+        create_videosource(source_pipeline, dbus, "/com/stbtester/VideoSource");
 
         uint32 request_name_result = 0;
         dbus.call_sync (
