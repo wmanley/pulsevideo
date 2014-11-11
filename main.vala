@@ -21,11 +21,18 @@ public class VideoSource : GLib.Object, VideoSource1 {
     public string caps { owned get { return caps_; } }
     private string caps_;
     private Gst.Element multisocketsink;
+    private Gst.Pipeline pipeline;
 
-    public VideoSource (string caps, Gst.Element multisocketsink)
+    public VideoSource (string caps, Gst.Pipeline pipeline,
+            Gst.Element multisocketsink)
     {
         this.caps_ = caps;
         this.multisocketsink = multisocketsink;
+        this.pipeline = pipeline;
+
+        var bus = pipeline.get_bus();
+        bus.add_signal_watch();
+        bus.message.connect(handle_message);
     }
 
     public GLib.UnixInputStream attach () throws Error
@@ -40,6 +47,25 @@ public class VideoSource : GLib.Object, VideoSource1 {
         GLib.Signal.emit_by_name(multisocketsink, "add", wtr, null);
 
         return new GLib.UnixInputStream(fds[1], true);
+    }
+
+    public void handle_message (Gst.Message message)
+    {
+        switch (message.type) {
+        case Gst.MessageType.ERROR:
+            GLib.Error error;
+            string debug;
+            message.parse_error(out error, out debug);
+            GLib.stderr.printf("Error: %s\n%s\n", error.message, debug);
+            exit (1);
+            break;
+        case Gst.MessageType.WARNING:
+            GLib.Error error;
+            string debug;
+            message.parse_warning(out error, out debug);
+            GLib.stderr.printf("Warning: %s\n%s\n", error.message, debug);
+            break;
+        }
     }
 }
 
@@ -58,7 +84,7 @@ void create_videosource(string source, GLib.DBusConnection dbus,
     pipeline.set_state (State.PLAYING);
 
     dbus.register_object(object_path,
-        (VideoSource1) new VideoSource(caps, sink));
+        (VideoSource1) new VideoSource(caps, pipeline, sink));
 }
 
 int main (string[] args) {
