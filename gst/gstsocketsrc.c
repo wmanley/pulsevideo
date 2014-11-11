@@ -169,8 +169,8 @@ gst_socket_src_fill (GstPushSrc * psrc, GstBuffer * outbuf)
   GST_LOG_OBJECT (src, "asked for a buffer");
 
   gst_buffer_map (outbuf, &map, GST_MAP_READWRITE);
-  rret = g_socket_receive_with_blocking (socket, (gchar *) map.data + rret,
-        map.size - rret, TRUE, src->cancellable, &err);
+  rret = g_socket_receive_with_blocking (socket, (gchar *) map.data,
+        map.size, TRUE, src->cancellable, &err);
   gst_buffer_unmap (outbuf, &map);
 
   if (rret == 0) {
