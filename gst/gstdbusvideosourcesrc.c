@@ -99,7 +99,8 @@ gst_dbus_videosource_src_class_init (GstDBusVideoSourceSrcClass * klass)
           G_TYPE_DBUS_CONNECTION, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
   g_object_class_install_property (gobject_class, PROP_BUS_NAME,
       g_param_spec_string ("bus-name", "Bus Name",
-          "The DBus bus name of the video source", "com.stbtester.VideoSource",
+          "The DBus bus name of the video source",
+          "com.stbtester.VideoSource.dev_video0",
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | G_PARAM_CONSTRUCT));
   g_object_class_install_property (gobject_class, PROP_OBJECT_PATH,
       g_param_spec_string ("object-path", "Object Path",

@@ -89,12 +89,18 @@ void create_videosource(string source, GLib.DBusConnection dbus,
 
 int main (string[] args) {
     string? source_pipeline = "v4l2src";
+    string? name = "dev_video0";
     GLib.OptionEntry[] options = {
         GLib.OptionEntry () {
             long_name = "source-pipeline", short_name = 0, flags = 0,
             arg = OptionArg.STRING, arg_data = &source_pipeline,
             description = "GStreamer pipeline to use as video source",
             arg_description = "SOURCE PIPELINE" },
+        GLib.OptionEntry () {
+            long_name = "bus-name-suffix", short_name = 0, flags = 0,
+            arg = OptionArg.STRING, arg_data = &name,
+            description = "DBus bus-name suffix",
+            arg_description = "BUS NAME SUFFIX" },
         GLib.OptionEntry ()
     };
 
@@ -122,7 +128,7 @@ int main (string[] args) {
         dbus.call_sync (
             "org.freedesktop.DBus", "/org/freedesktop/DBus",
             "org.freedesktop.DBus", "RequestName",
-            new Variant ("(su)", "com.stbtester.VideoSource1", 0x4),
+            new Variant ("(su)", "com.stbtester.VideoSource." + name, 0x4),
             null, 0, -1).get("(u)", &request_name_result);
         if (request_name_result == 0) {
             GLib.stderr.printf ("Could not register name on DBus");
