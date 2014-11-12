@@ -88,7 +88,7 @@ void create_videosource(string source, GLib.DBusConnection dbus,
 }
 
 int main (string[] args) {
-    string? source_pipeline = null;
+    string? source_pipeline = "v4l2src";
     GLib.OptionEntry[] options = {
         GLib.OptionEntry () {
             long_name = "source-pipeline", short_name = 0, flags = 0,
