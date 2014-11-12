@@ -1,6 +1,8 @@
 # The default target of this Makefile is:
 all:
 
+-include config.mk
+
 PKG_DEPS=gstreamer-1.0 gstreamer-base-1.0 gio-2.0 gio-unix-2.0 gstreamer-video-1.0
 
 prefix?=/usr/local
