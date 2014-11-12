@@ -324,7 +324,7 @@ gst_dbus_videosource_src_stop (GstBaseSrc * bsrc)
 
   GDBusProxy *videosource = NULL;
 
-/*  gst_base_src_set_caps (bsrc, GST_CAPS_ANY);*/
+  gst_base_src_set_caps (bsrc, GST_CAPS_ANY);
 
   GST_OBJECT_LOCK (src);
   SWAP (videosource, src->videosource);
