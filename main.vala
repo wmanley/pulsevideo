@@ -37,6 +37,9 @@ public class VideoSource : GLib.Object, VideoSource1 {
 
     public GLib.UnixInputStream attach () throws Error
     {
+        GLib.stderr.printf("Attaching client, entering PLAYING state\n");
+        pipeline.set_state(Gst.State.PLAYING);
+
         var fds = new int[2];
         var error = Posix.socketpair (Posix.AF_UNIX, Posix.SOCK_STREAM, 0,
             fds);
@@ -79,9 +82,6 @@ void create_videosource(string source, GLib.DBusConnection dbus,
         + " ! multisocketsink buffers-max=1 name=sink sync=false");
 
     var sink = pipeline.get_by_name("sink");
-
-    // Set pipeline state to PLAYING
-    pipeline.set_state (State.PLAYING);
 
     dbus.register_object(object_path,
         (VideoSource1) new VideoSource(caps, pipeline, sink));
