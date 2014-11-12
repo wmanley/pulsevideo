@@ -3,5 +3,5 @@ client.c
 gst/gstpulsevideo.so
 gst/gstvideosource1.c
 gst/gstvideosource1.h
-main
+pulsevideo
 VERSION

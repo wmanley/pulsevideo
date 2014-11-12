@@ -42,7 +42,7 @@ ESCAPED_VERSION=$(subst -,_,$(VERSION))
 .DELETE_ON_ERROR:
 
 
-all : main client gst/gstpulsevideo.so
+all : pulsevideo client gst/gstpulsevideo.so
 
 % : %.vala
 	valac --vapidir=vapi -o $@ $(VALAFLAGS) $<
@@ -50,11 +50,11 @@ all : main client gst/gstpulsevideo.so
 %.c : %.vala
 	valac --vapidir=vapi -C -o $@ $(VALAFLAGS) $<
 
-install : main client gst/gstpulsevideo.so VERSION
+install : pulsevideo client gst/gstpulsevideo.so VERSION
 	$(INSTALL) -m 0755 -d \
 	    $(DESTDIR)$(bindir) \
 	    $(DESTDIR)$(gstpluginsdir)
-	$(INSTALL) -m 0755 main client $(DESTDIR)$(bindir)
+	$(INSTALL) -m 0755 pulsevideo client $(DESTDIR)$(bindir)
 	$(INSTALL) -m 0644 gst/gstpulsevideo.so \
 	    $(DESTDIR)$(gstpluginsdir)
 
