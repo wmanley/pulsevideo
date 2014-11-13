@@ -136,7 +136,7 @@ int main (string[] args) {
         }
     }
     catch (Error e) {
-        GLib.stderr.printf ("Error: %s".printf(e.message));
+        GLib.stderr.printf ("Error: %s", e.message);
         return 1;
     }
 
