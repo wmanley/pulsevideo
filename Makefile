@@ -45,7 +45,7 @@ ESCAPED_VERSION=$(subst -,_,$(VERSION))
 .DELETE_ON_ERROR:
 
 
-all : pulsevideo gst/gstpulsevideo.so
+all : pulsevideo gst/libgstpulsevideo.so
 
 % : %.vala
 	valac --vapidir=vapi -o $@ $(VALAFLAGS) $<
@@ -53,12 +53,12 @@ all : pulsevideo gst/gstpulsevideo.so
 %.c : %.vala
 	valac --vapidir=vapi -C -o $@ $(VALAFLAGS) $<
 
-install : pulsevideo gst/gstpulsevideo.so VERSION
+install : pulsevideo gst/libgstpulsevideo.so VERSION
 	$(INSTALL) -m 0755 -d \
 	    $(DESTDIR)$(bindir) \
 	    $(DESTDIR)$(gstpluginsdir)
 	$(INSTALL) -m 0755 pulsevideo $(DESTDIR)$(bindir)
-	$(INSTALL) -m 0644 gst/gstpulsevideo.so \
+	$(INSTALL) -m 0644 gst/libgstpulsevideo.so \
 	    $(DESTDIR)$(gstpluginsdir)
 
 clean:
@@ -96,7 +96,7 @@ sq = $(subst ','\'',$(1)) # function to escape single quotes (')
 	    echo '$(flags)' > $@; \
 	fi
 
-gst/gstpulsevideo.so : \
+gst/libgstpulsevideo.so : \
 		gst/gstdbusvideosourcesrc.h \
 		gst/gstdbusvideosourcesrc.c \
 		gst/gstpulsevideoplugin.c \
