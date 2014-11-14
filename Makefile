@@ -37,7 +37,8 @@ VALAFLAGS = $(patsubst %,--pkg %,$(VALA_PKGDEPS))
 generate_version := $(shell \
 	GIT_DIR=.git git describe --always --dirty > VERSION.now 2>/dev/null && \
 	{ cmp VERSION.now VERSION 2>/dev/null || mv VERSION.now VERSION; }; \
-	rm -f VERSION.now)
+	rm -f VERSION.now; \
+	[ -e VERSION ] || echo UNKNOWN >VERSION; )
 VERSION?=$(shell cat VERSION)
 ESCAPED_VERSION=$(subst -,_,$(VERSION))
 
