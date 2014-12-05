@@ -53,11 +53,19 @@ all : pulsevideo gst/libgstpulsevideo.so
 %.c : %.vala
 	valac --vapidir=vapi -C -o $@ $(VALAFLAGS) $<
 
-install : pulsevideo gst/libgstpulsevideo.so VERSION
+server : pulsevideo
+client : gst/libgstpulsevideo.so
+
+install : install-client install-server
+
+install-server : pulsevideo VERSION
 	$(INSTALL) -m 0755 -d \
-	    $(DESTDIR)$(bindir) \
-	    $(DESTDIR)$(gstpluginsdir)
+	    $(DESTDIR)$(bindir) && \
 	$(INSTALL) -m 0755 pulsevideo $(DESTDIR)$(bindir)
+
+install-client : gst/libgstpulsevideo.so
+	$(INSTALL) -m 0755 -d \
+	    $(DESTDIR)$(gstpluginsdir) && \
 	$(INSTALL) -m 0644 gst/libgstpulsevideo.so \
 	    $(DESTDIR)$(gstpluginsdir)
 
