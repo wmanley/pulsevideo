@@ -72,11 +72,10 @@ public class VideoSource : GLib.Object, VideoSource1 {
     }
 }
 
-void create_videosource(string source, GLib.DBusConnection dbus,
+void create_videosource(string source, string caps, GLib.DBusConnection dbus,
         string object_path) throws Error
 {
     // Creating pipeline and elements
-    var caps = "video/x-raw,format=RGB,width=1280,height=720,framerate=30/1";
     var pipeline = (Gst.Pipeline) Gst.parse_launch(
         source + " ! watchdog ! videoconvert ! " + caps
         + " ! multisocketsink buffers-max=1 name=sink sync=false");
@@ -89,8 +88,15 @@ void create_videosource(string source, GLib.DBusConnection dbus,
 
 int main (string[] args) {
     string? source_pipeline = "v4l2src";
+    string? caps =
+        "video/x-raw,format=BGR,width=1280,height=720,framerate=30/1";
     string? name = "dev_video0";
     GLib.OptionEntry[] options = {
+        GLib.OptionEntry () {
+            long_name = "caps", short_name = 0, flags = 0,
+            arg = OptionArg.STRING, arg_data = &caps,
+            description = "Video format to use",
+            arg_description = "CAPS" },
         GLib.OptionEntry () {
             long_name = "source-pipeline", short_name = 0, flags = 0,
             arg = OptionArg.STRING, arg_data = &source_pipeline,
@@ -122,7 +128,8 @@ int main (string[] args) {
     try {
         var dbus = GLib.Bus.get_sync (BusType.SESSION);
 
-        create_videosource(source_pipeline, dbus, "/com/stbtester/VideoSource");
+        create_videosource(
+            source_pipeline, caps, dbus, "/com/stbtester/VideoSource");
 
         uint32 request_name_result = 0;
         dbus.call_sync (
