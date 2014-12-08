@@ -1,5 +1,5 @@
 config.mk
-gst/gstpulsevideo.so
+gst/libgstpulsevideo.so
 gst/gstvideosource1.c
 gst/gstvideosource1.h
 pulsevideo
