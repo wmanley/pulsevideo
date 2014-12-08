@@ -14,4 +14,4 @@ install:
 
 script:
  - make prefix=/usr
- - make install prefix=/usr
+ - sudo make install prefix=/usr
