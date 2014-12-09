@@ -4,6 +4,7 @@ install:
  - sudo add-apt-repository -y ppa:gstreamer-developers/ppa
  - sudo apt-get update
  - sudo apt-get install
+        gir1.2-gstreamer-1.0
         git
         make
         gstreamer1.0-plugins-bad
