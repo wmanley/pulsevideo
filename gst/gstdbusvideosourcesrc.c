@@ -126,6 +126,7 @@ static void
 gst_dbus_videosource_src_init (GstDBusVideoSourceSrc * this)
 {
   this->cancellable = g_cancellable_new ();
+  gst_base_src_set_live (GST_BASE_SRC (this), TRUE);
 }
 
 static void
