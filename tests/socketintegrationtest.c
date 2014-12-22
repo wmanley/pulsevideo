@@ -283,6 +283,41 @@ GST_START_TEST (test_that_fdpay_and_fddepay_are_symmetrical)
 
 GST_END_TEST
 
+
+static gsize
+count_fds(void)
+{
+  gsize count = 0;
+  GDir *dir = g_dir_open ("/proc/self/fd", 0, NULL);
+  fail_unless (dir != NULL);
+  while (g_dir_read_name(dir))
+    count++;
+  g_dir_close (dir);
+  return count;
+}
+
+GST_START_TEST (test_that_zerocopy_doesnt_leak_fds)
+{
+  gint i;
+  gsize fd_count;
+
+  SymmetryTest st = { 0 };
+  setup_zerocopy_symmetry_test (&st);
+  symmetry_test_assert_passthrough (&st,
+      gst_buffer_new_wrapped (g_strdup ("hello"), 5));
+
+  fd_count = count_fds();
+  for (i = 0; i < 1000; i++) {
+    symmetry_test_assert_passthrough (&st,
+        gst_buffer_new_wrapped (g_strdup ("hello"), 5));
+  }
+  fail_unless_equals_int (fd_count, count_fds());
+
+  symmetry_test_teardown (&st);
+}
+
+GST_END_TEST
+
 static Suite *
 socketintegrationtest_suite (void)
 {
@@ -296,6 +331,8 @@ socketintegrationtest_suite (void)
       test_that_multisocketsink_and_socketsrc_preserve_meta);
   tcase_add_test (tc_chain,
       test_that_fdpay_and_fddepay_are_symmetrical);
+  tcase_add_test (tc_chain,
+      test_that_zerocopy_doesnt_leak_fds);
 
   return s;
 }
