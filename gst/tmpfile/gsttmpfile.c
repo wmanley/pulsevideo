@@ -21,12 +21,15 @@
 #include "config.h"
 #endif
 
+#include "gstfddepay.h"
 #include "gstfdpay.h"
 
 static gboolean
 plugin_init (GstPlugin * plugin)
 {
-  return gst_element_register (plugin, "fdpay", GST_RANK_NONE, GST_TYPE_FDPAY);
+  return gst_element_register (plugin, "fddepay", GST_RANK_NONE,
+      GST_TYPE_FDDEPAY)
+      && gst_element_register (plugin, "fdpay", GST_RANK_NONE, GST_TYPE_FDPAY);
 }
 
 GST_PLUGIN_DEFINE (GST_VERSION_MAJOR,
