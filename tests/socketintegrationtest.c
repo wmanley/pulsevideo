@@ -65,7 +65,6 @@ symmetry_test_setup (SymmetryTest * st, GstElement * sink, GstElement * src)
 {
   GstCaps *caps;
   st->sink = sink;
-  g_object_set (sink, "sync", FALSE, NULL);
   st->src = src;
 
   st->sink_pipeline = GST_PIPELINE (gst_pipeline_new (NULL));
@@ -247,6 +246,49 @@ GST_START_TEST (test_that_multisocketsink_and_socketsrc_preserve_meta)
 
 GST_END_TEST;
 
+static void
+setup_zerocopy_symmetry_test (SymmetryTest * st)
+{
+  GSocket *sockets[2] = { NULL, NULL };
+  GError *err = NULL;
+  GstElement *zerocopysink, *zerocopysrc, *socketsrc, *socketsink;
+
+  zerocopysink = gst_parse_bin_from_description (
+      "fdpay ! pvmultisocketsink name=socketsink", TRUE, NULL);
+  zerocopysrc = gst_parse_bin_from_description (
+      "pvsocketsrc name=socketsrc ! fddepay", TRUE, NULL);
+
+  fail_unless (zerocopysink != NULL);
+  fail_unless (zerocopysrc != NULL);
+  fail_unless (g_socketpair (G_SOCKET_FAMILY_UNIX,
+          G_SOCKET_TYPE_STREAM | SOCK_CLOEXEC, G_SOCKET_PROTOCOL_DEFAULT,
+          sockets, &err));
+
+  socketsrc = gst_bin_get_by_name (GST_BIN (zerocopysrc), "socketsrc");
+  g_object_set (socketsrc, "socket", sockets[0], NULL);
+  GST_UNREF (socketsrc);
+  G_UNREF (sockets[0]);
+
+  symmetry_test_setup (st, zerocopysink, zerocopysrc);
+
+  socketsink = gst_bin_get_by_name (GST_BIN (zerocopysink), "socketsink");
+  g_signal_emit_by_name (socketsink, "add", sockets[1], NULL);
+  GST_UNREF (socketsink);
+  G_UNREF (sockets[1]);
+}
+
+GST_START_TEST (test_that_fdpay_and_fddepay_are_symmetrical)
+{
+  SymmetryTest st = { 0 };
+  setup_zerocopy_symmetry_test (&st);
+  symmetry_test_assert_passthrough (&st,
+      gst_buffer_new_wrapped (g_strdup ("hello"), 5));
+  symmetry_test_teardown (&st);
+
+}
+
+GST_END_TEST
+
 static Suite *
 socketintegrationtest_suite (void)
 {
@@ -258,6 +300,8 @@ socketintegrationtest_suite (void)
       test_that_socketsrc_and_multisocketsink_are_symmetrical);
   tcase_add_test (tc_chain,
       test_that_multisocketsink_and_socketsrc_preserve_meta);
+  tcase_add_test (tc_chain,
+      test_that_fdpay_and_fddepay_are_symmetrical);
 
   return s;
 }
