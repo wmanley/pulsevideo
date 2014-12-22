@@ -70,7 +70,7 @@ install-client : build/libgstpulsevideo.so
 	    $(DESTDIR)$(gstpluginsdir)
 
 clean:
-	git clean -fX
+	git clean -fdX
 
 tests/socketintegrationtest : tests/socketintegrationtest.c build/gstnetcontrolmessagemeta.h build/libgstpulsevideo.so
 	gcc -o$@ $< -Wall -Werror $(CFLAGS) $$(pkg-config --cflags --libs $(PKG_DEPS) gstreamer-check-1.0 gstreamer-app-1.0) -Lbuild/ -lgstpulsevideo
