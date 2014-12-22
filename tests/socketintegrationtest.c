@@ -32,12 +32,6 @@
 #include "sys/stat.h"
 #include "fcntl.h"
 
-#define G_UNREF(x) \
-  do { \
-    if ( x ) \
-      g_object_unref ( x ); \
-    x = NULL; \
-  } while (0);
 #define GST_UNREF(x) \
   do { \
     if ( x ) \
@@ -149,7 +143,7 @@ g_socketpair (GSocketFamily family, GSocketType type, GSocketProtocol protocol,
   }
   gsv[1] = g_socket_new_from_fd (sv[1], error);
   if (gsv[1] == NULL) {
-    g_object_unref (gsv[0]);
+    g_clear_object (&gsv[0]);
     gsv[0] = NULL;
     close (sv[1]);
     return FALSE;
@@ -172,13 +166,13 @@ setup_multisocketsink_and_socketsrc (SymmetryTest * st)
           sockets, &err));
 
   g_object_set (socketsrc, "socket", sockets[0], NULL);
-  g_object_unref (sockets[0]);
+  g_clear_object (&sockets[0]);
   sockets[0] = NULL;
 
   symmetry_test_setup (st, socketsink, socketsrc);
 
   g_signal_emit_by_name (socketsink, "add", sockets[1], NULL);
-  g_object_unref (sockets[1]);
+  g_clear_object (&sockets[1]);
   sockets[1] = NULL;
 }
 
@@ -212,7 +206,7 @@ GST_START_TEST (test_that_multisocketsink_and_socketsrc_preserve_meta)
 
   buf = gst_buffer_new_wrapped (g_strdup ("hello"), 5);
   gst_buffer_add_net_control_message_meta (buf, msg);
-  G_UNREF(msg);
+  g_clear_object (&msg);
 
   fail_unless (gst_app_src_push_buffer (st.sink_src, buf) == GST_FLOW_OK);
 
@@ -267,14 +261,14 @@ setup_zerocopy_symmetry_test (SymmetryTest * st)
   socketsrc = gst_bin_get_by_name (GST_BIN (zerocopysrc), "socketsrc");
   g_object_set (socketsrc, "socket", sockets[0], NULL);
   GST_UNREF (socketsrc);
-  G_UNREF (sockets[0]);
+  g_clear_object (&sockets[0]);
 
   symmetry_test_setup (st, zerocopysink, zerocopysrc);
 
   socketsink = gst_bin_get_by_name (GST_BIN (zerocopysink), "socketsink");
   g_signal_emit_by_name (socketsink, "add", sockets[1], NULL);
   GST_UNREF (socketsink);
-  G_UNREF (sockets[1]);
+  g_clear_object (&sockets[1]);
 }
 
 GST_START_TEST (test_that_fdpay_and_fddepay_are_symmetrical)

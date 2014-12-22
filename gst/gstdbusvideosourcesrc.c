@@ -40,13 +40,6 @@
 GST_DEBUG_CATEGORY_STATIC (dbusvideosourcesrc_debug);
 #define GST_CAT_DEFAULT dbusvideosourcesrc_debug
 
-#define UNREF(x) \
-  do { \
-    if ( x ) \
-      g_object_unref ( x ); \
-    x = NULL; \
-  } while (0);
-
 #define SWAP(x,y) do \
    { unsigned char swap_temp[sizeof(x) == sizeof(y) ? (signed)sizeof(x) : -1]; \
      memcpy(swap_temp,&y,sizeof(x)); \
@@ -137,9 +130,9 @@ gst_dbus_videosource_src_finalize (GObject * gobject)
   g_free (this->bus_name);
   this->bus_name = NULL;
   g_free (this->object_path);
-  UNREF (this->cancellable);
-  UNREF (this->dbus);
-  UNREF (this->videosource);
+  g_clear_object (&this->cancellable);
+  g_clear_object (&this->dbus);
+  g_clear_object (&this->videosource);
 
   G_OBJECT_CLASS (parent_class)->finalize (gobject);
 }
@@ -155,7 +148,7 @@ gst_dbus_videosource_src_set_property (GObject * object, guint prop_id,
       GDBusConnection *conn;
       conn = g_value_get_object (value);
       SWAP (conn, src->dbus);
-      UNREF (conn);
+      g_clear_object (&conn);
       break;
     }
     case PROP_BUS_NAME: {
@@ -304,10 +297,10 @@ gst_dbus_videosource_src_start (GstBaseSrc * bsrc)
   ret = TRUE;
 
 done:
-  UNREF (dbus);
-  UNREF (videosource);
-  UNREF (fdlist);
-  UNREF (socket);
+  g_clear_object (&dbus);
+  g_clear_object (&videosource);
+  g_clear_object (&fdlist);
+  g_clear_object (&socket);
 
   g_free (bus_name);
   g_free (object_path);
@@ -332,7 +325,7 @@ gst_dbus_videosource_src_stop (GstBaseSrc * bsrc)
   SWAP (videosource, src->videosource);
   GST_OBJECT_UNLOCK (src);
 
-  UNREF (videosource);
+  g_clear_object (&videosource);
 
   return TRUE;
 }

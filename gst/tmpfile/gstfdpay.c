@@ -58,12 +58,6 @@
 GST_DEBUG_CATEGORY_STATIC (gst_fdpay_debug_category);
 #define GST_CAT_DEFAULT gst_fdpay_debug_category
 
-#define G_UNREF(x) \
-  do { \
-    if ( x ) \
-      g_object_unref ( x ); \
-    x = NULL; \
-  } while (0);
 #define GST_UNREF(x) \
   do { \
     if ( x ) \
@@ -262,7 +256,7 @@ gst_fdpay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
   return GST_FLOW_OK;
 append_fd_failed:
   GST_WARNING_OBJECT (trans, "Appending fd failed: %s", err->message);
-  g_error_free (err);
-  G_UNREF (fdmsg);
+  g_clear_error (&err);
+  g_clear_object (&fdmsg);
   return GST_FLOW_ERROR;
 }
