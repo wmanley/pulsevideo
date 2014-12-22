@@ -23,15 +23,18 @@
 
 #include "gstsocketsrc.h"
 #include "gstdbusvideosourcesrc.h"
+#include "tcp/gstmultisocketsink.h"
 
 static gboolean
 plugin_init (GstPlugin * plugin)
 {
   return
-    gst_element_register (plugin, "socketsrc", GST_RANK_NONE,
+    gst_element_register (plugin, "pvsocketsrc", GST_RANK_NONE,
           GST_TYPE_SOCKET_SRC) &&
     gst_element_register (plugin, "dbusvideosourcesrc", GST_RANK_NONE,
-          GST_TYPE_DBUS_VIDEOSOURCE_SRC);
+          GST_TYPE_DBUS_VIDEOSOURCE_SRC) &&
+    gst_element_register (plugin, "pvmultisocketsink", GST_RANK_NONE,
+          GST_TYPE_MULTI_SOCKET_SINK);
 }
 
 GST_PLUGIN_DEFINE (GST_VERSION_MAJOR,

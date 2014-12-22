@@ -78,7 +78,7 @@ void create_videosource(string source, string caps, GLib.DBusConnection dbus,
     // Creating pipeline and elements
     var pipeline = (Gst.Pipeline) Gst.parse_launch(
         source + " ! watchdog ! videoconvert ! " + caps
-        + " ! multisocketsink buffers-max=2 buffers-soft-max=1 "
+        + " ! pvmultisocketsink buffers-max=2 buffers-soft-max=1 "
         + "recover-policy=latest sync-method=latest name=sink sync=false");
 
     var sink = pipeline.get_by_name("sink");

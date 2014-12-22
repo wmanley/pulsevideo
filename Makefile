@@ -45,7 +45,7 @@ ESCAPED_VERSION=$(subst -,_,$(VERSION))
 .DELETE_ON_ERROR:
 
 
-all : pulsevideo gst/libgstpulsevideo.so
+all : pulsevideo build/libgstpulsevideo.so
 
 % : %.vala
 	valac --vapidir=vapi -o $@ $(VALAFLAGS) $<
@@ -54,7 +54,7 @@ all : pulsevideo gst/libgstpulsevideo.so
 	valac --vapidir=vapi -C -o $@ $(VALAFLAGS) $<
 
 server : pulsevideo
-client : gst/libgstpulsevideo.so
+client : build/libgstpulsevideo.so
 
 install : install-client install-server
 
@@ -63,10 +63,10 @@ install-server : pulsevideo VERSION
 	    $(DESTDIR)$(bindir) && \
 	$(INSTALL) -m 0755 pulsevideo $(DESTDIR)$(bindir)
 
-install-client : gst/libgstpulsevideo.so
+install-client : build/libgstpulsevideo.so
 	$(INSTALL) -m 0755 -d \
 	    $(DESTDIR)$(gstpluginsdir) && \
-	$(INSTALL) -m 0644 gst/libgstpulsevideo.so \
+	$(INSTALL) -m 0644 build/libgstpulsevideo.so \
 	    $(DESTDIR)$(gstpluginsdir)
 
 clean:
@@ -104,14 +104,50 @@ sq = $(subst ','\'',$(1)) # function to escape single quotes (')
 	    echo '$(flags)' > $@; \
 	fi
 
-gst/libgstpulsevideo.so : \
-		gst/gstdbusvideosourcesrc.h \
-		gst/gstdbusvideosourcesrc.c \
-		gst/gstpulsevideoplugin.c \
-		gst/gstsocketsrc.h \
-		gst/gstsocketsrc.c \
-		gst/gstvideosource1.c \
-		gst/gstvideosource1.h \
+build/tcp :
+	mkdir -p $@
+
+build/%.c : gst/%.c Makefile | build/tcp
+	sed -e 's/GstMulti/PvMulti/g' \
+	    -e 's/GST_MULTI/PV_MULTI/g' \
+	    -e 's/gst_multi/pv_multi/g' \
+	    -e 's/GST_TYPE_MULTI/PV_TYPE_MULTI/g' \
+	    -e 's/gstmulti/pvmulti/g' \
+	    -e 's/GstSocket/PvSocket/g' \
+	    -e 's/gst_socket/pv_socket/g' \
+	    -e 's/GST_SOCKET/PV_SOCKET/g' \
+	    $< \
+	| sed -e 's/include "pv/include "gst/g' \
+	      -e 's,include "tcp/pv,include "tcp/gst,g' \
+	      >$@
+build/%.h : gst/%.h Makefile | build/tcp
+	sed -e 's/GstMulti/PvMulti/g' \
+	    -e 's/GST_MULTI/PV_MULTI/g' \
+	    -e 's/gst_multi/pv_multi/g' \
+	    -e 's/GST_TYPE_MULTI/PV_TYPE_MULTI/g' \
+	    -e 's/gstmulti/pvmulti/g' \
+	    -e 's/GstSocket/PvSocket/g' \
+	    -e 's/gst_socket/pv_socket/g' \
+	    -e 's/GST_SOCKET/PV_SOCKET/g' \
+	    $< \
+	| sed -e 's/include "pv/include "gst/g' \
+	      -e 's,include "tcp/pv,include "tcp/gst,g' \
+	      >$@
+
+build/libgstpulsevideo.so : \
+		build/gstdbusvideosourcesrc.h \
+		build/gstdbusvideosourcesrc.c \
+		build/gstnetcontrolmessagemeta.c \
+		build/gstnetcontrolmessagemeta.h \
+		build/gstpulsevideoplugin.c \
+		build/gstsocketsrc.h \
+		build/gstsocketsrc.c \
+		build/gstvideosource1.c \
+		build/gstvideosource1.h \
+		build/tcp/gstmultihandlesink.h \
+		build/tcp/gstmultihandlesink.c \
+		build/tcp/gstmultisocketsink.h \
+		build/tcp/gstmultisocketsink.c \
 		VERSION
 	@if ! pkg-config --exists $(PKG_DEPS); then \
 		printf "Please install packages $(PKG_DEPS)"; exit 1; fi
@@ -119,7 +155,7 @@ gst/libgstpulsevideo.so : \
 		$(LDFLAGS) $$(pkg-config --libs --cflags $(PKG_DEPS)) \
 		-DVERSION=\"$(VERSION)\" -DPACKAGE="\"pulsevideo\""
 
-gst/gstvideosource1.c gst/gstvideosource1.h : \
+build/gstvideosource1.c build/gstvideosource1.h : \
 		dbus-xml/com.stbtester.VideoSource1.xml
 	cd $(dir $@) && \
 	gdbus-codegen \
