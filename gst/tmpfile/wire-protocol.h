@@ -1,5 +1,5 @@
 /* GStreamer
- * Copyright (C) <2014> William Manley <will@williammanley.net>
+ * Copyright (C) 2014 William Manley <will@williammanley.net>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -17,20 +17,17 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
+#ifndef _GST_FDPAY_WIRE_PROTOCOL_H_
+#define _GST_FDPAY_WIRE_PROTOCOL_H_
+
+#include <stdint.h>
+
+/* Almost the simplest possible FD passing protocol.  Each message should have
+ * a file-descriptor attached which should be mmapable.  The data in the FD can
+ * be found at offset and is size bytes long. */
+typedef struct {
+  uint64_t offset;
+  uint64_t size;
+} FDMessage;
+
 #endif
-
-#include "gstfdpay.h"
-
-static gboolean
-plugin_init (GstPlugin * plugin)
-{
-  return gst_element_register (plugin, "fdpay", GST_RANK_NONE, GST_TYPE_FDPAY);
-}
-
-GST_PLUGIN_DEFINE (GST_VERSION_MAJOR,
-    GST_VERSION_MINOR,
-    tmpfile,
-    "File descriptor payloader",
-    plugin_init, VERSION, GST_LICENSE, GST_PACKAGE_NAME, GST_PACKAGE_ORIGIN)
