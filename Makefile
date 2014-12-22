@@ -72,8 +72,11 @@ install-client : build/libgstpulsevideo.so
 clean:
 	git clean -fX
 
-check:
-	true
+tests/socketintegrationtest : tests/socketintegrationtest.c
+	gcc -o$@ $< -Wall -Werror $(CFLAGS) $$(pkg-config --cflags --libs $(PKG_DEPS) gstreamer-check-1.0 gstreamer-app-1.0) -Lbuild/ -lgstpulsevideo #gst/gstnetcontrolmessagemeta.c
+
+check: ./tests/socketintegrationtest build/libgstpulsevideo.so
+	GST_PLUGIN_PATH=$(PWD)/build LD_LIBRARY_PATH=$(PWD)/build ./tests/socketintegrationtest
 
 # Can only be run from within a git clone of pulsevideo or VERSION (and the
 # list of files) won't be set correctly.

@@ -4,4 +4,5 @@ gst/libgstpulsevideo.so
 gst/gstvideosource1.c
 gst/gstvideosource1.h
 pulsevideo
+tests/socketintegrationtest
 VERSION
