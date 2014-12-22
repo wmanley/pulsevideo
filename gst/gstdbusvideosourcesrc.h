@@ -22,7 +22,7 @@
 #define __GST_DBUS_VIDEOSOURCE_SRC_H__
 
 #include <gst/gst.h>
-#include "gstsocketsrc.h"
+#include <gst/gstbin.h>
 
 #include <gio/gio.h>
 
@@ -43,9 +43,12 @@ typedef struct _GstDBusVideoSourceSrc GstDBusVideoSourceSrc;
 typedef struct _GstDBusVideoSourceSrcClass GstDBusVideoSourceSrcClass;
 
 struct _GstDBusVideoSourceSrc {
-  GstSocketSrc element;
+  GstBin element;
 
   /*< private >*/
+  GstElement *socketsrc;
+  GstElement *fddepay;
+  GstElement *capsfilter;
   GCancellable *cancellable;
   GDBusConnection *dbus;
   gchar *bus_name;
@@ -55,7 +58,7 @@ struct _GstDBusVideoSourceSrc {
 };
 
 struct _GstDBusVideoSourceSrcClass {
-  GstSocketSrcClass parent_class;
+  GstBinClass parent_class;
 };
 
 GType gst_dbus_videosource_src_get_type (void);

@@ -56,31 +56,30 @@ enum
 };
 
 #define gst_dbus_videosource_src_parent_class parent_class
-G_DEFINE_TYPE (GstDBusVideoSourceSrc, gst_dbus_videosource_src, GST_TYPE_SOCKET_SRC);
+G_DEFINE_TYPE (GstDBusVideoSourceSrc, gst_dbus_videosource_src, GST_TYPE_BIN);
 
 
 static void gst_dbus_videosource_src_finalize (GObject * gobject);
 
-static gboolean gst_dbus_videosource_src_stop (GstBaseSrc * bsrc);
-static gboolean gst_dbus_videosource_src_start (GstBaseSrc * bsrc);
-static gboolean gst_dbus_videosource_src_unlock (GstBaseSrc * bsrc);
-static gboolean gst_dbus_videosource_src_unlock_stop (GstBaseSrc * bsrc);
+static gboolean gst_dbus_videosource_src_stop (GstDBusVideoSourceSrc * bsrc);
+static gboolean gst_dbus_videosource_src_start (GstDBusVideoSourceSrc * bsrc);
 
 static void gst_dbus_videosource_src_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec);
 static void gst_dbus_videosource_src_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec);
 
+static GstStateChangeReturn gst_dbus_videosource_src_change_state (
+    GstElement * element, GstStateChange transition);
+
 static void
 gst_dbus_videosource_src_class_init (GstDBusVideoSourceSrcClass * klass)
 {
   GObjectClass *gobject_class;
   GstElementClass *gstelement_class;
-  GstBaseSrcClass *gstbasesrc_class;
 
   gobject_class = (GObjectClass *) klass;
   gstelement_class = (GstElementClass *) klass;
-  gstbasesrc_class = (GstBaseSrcClass *) klass;
 
   gobject_class->set_property = gst_dbus_videosource_src_set_property;
   gobject_class->get_property = gst_dbus_videosource_src_get_property;
@@ -107,10 +106,7 @@ gst_dbus_videosource_src_class_init (GstDBusVideoSourceSrcClass * klass)
       "com.stbtester.VideoSource1 interface",
       "William Manley <will@williammanley.net>");
 
-  gstbasesrc_class->start = gst_dbus_videosource_src_start;
-  gstbasesrc_class->stop = gst_dbus_videosource_src_stop;
-  gstbasesrc_class->unlock = gst_dbus_videosource_src_unlock;
-  gstbasesrc_class->unlock_stop = gst_dbus_videosource_src_unlock_stop;
+  gstelement_class->change_state = gst_dbus_videosource_src_change_state;
   GST_DEBUG_CATEGORY_INIT (dbusvideosourcesrc_debug, "dbusvideosourcesrc", 0,
       "DBus VideoSource Source");
 }
@@ -118,8 +114,22 @@ gst_dbus_videosource_src_class_init (GstDBusVideoSourceSrcClass * klass)
 static void
 gst_dbus_videosource_src_init (GstDBusVideoSourceSrc * this)
 {
+  GstPad *pad;
+
   this->cancellable = g_cancellable_new ();
-  gst_base_src_set_live (GST_BASE_SRC (this), TRUE);
+  this->socketsrc = gst_element_factory_make ("pvsocketsrc", NULL);
+  gst_bin_add (GST_BIN (this), gst_object_ref (this->socketsrc));
+  this->fddepay = gst_element_factory_make ("pvfddepay", NULL);
+  gst_bin_add (GST_BIN (this), gst_object_ref (this->fddepay));
+  this->capsfilter = gst_element_factory_make ("capsfilter", NULL);
+  gst_bin_add (GST_BIN (this), gst_object_ref (this->capsfilter));
+  gst_element_link_many (
+        this->socketsrc, this->fddepay, this->capsfilter, NULL);
+
+  pad = gst_element_get_static_pad (this->capsfilter, "src");
+  gst_element_add_pad (GST_ELEMENT (this), gst_ghost_pad_new ("src", pad));
+  gst_object_unref (pad);
+
 }
 
 static void
@@ -133,6 +143,9 @@ gst_dbus_videosource_src_finalize (GObject * gobject)
   g_clear_object (&this->cancellable);
   g_clear_object (&this->dbus);
   g_clear_object (&this->videosource);
+  g_clear_object (&this->socketsrc);
+  g_clear_object (&this->fddepay);
+  g_clear_object (&this->capsfilter);
 
   G_OBJECT_CLASS (parent_class)->finalize (gobject);
 }
@@ -208,9 +221,47 @@ gst_dbus_videosource_src_get_property (GObject * object, guint prop_id,
   }
 }
 
+static GstStateChangeReturn
+gst_dbus_videosource_src_change_state (GstElement * element,
+    GstStateChange transition)
+{
+  GstDBusVideoSourceSrc *src;
+  GstStateChangeReturn result;
+
+  src = GST_DBUS_VIDEOSOURCE_SRC (element);
+
+  if (transition == GST_STATE_CHANGE_READY_TO_PAUSED) {
+    if (!gst_dbus_videosource_src_start ((GstDBusVideoSourceSrc*) element)) {
+      result = GST_STATE_CHANGE_FAILURE;
+      goto failure;
+    }
+  }
+
+  if ((result = GST_ELEMENT_CLASS (parent_class)->change_state (element,
+              transition)) == GST_STATE_CHANGE_FAILURE)
+    goto failure;
+
+  if (transition == GST_STATE_CHANGE_PAUSED_TO_READY) {
+    g_cancellable_cancel (src->cancellable);
+    gst_dbus_videosource_src_stop ((GstDBusVideoSourceSrc *)element);
+  }
+
+  if (transition == GST_STATE_CHANGE_READY_TO_PAUSED) {
+    result = GST_STATE_CHANGE_NO_PREROLL;
+  }
+  return result;
+
+  /* ERRORS */
+failure:
+  {
+    GST_DEBUG_OBJECT (src, "parent failed state change");
+    return result;
+  }
+}
+
 /* create a socket for connecting to remote server */
 static gboolean
-gst_dbus_videosource_src_start (GstBaseSrc * bsrc)
+gst_dbus_videosource_src_start (GstDBusVideoSourceSrc * bsrc)
 {
   GstDBusVideoSourceSrc *src = GST_DBUS_VIDEOSOURCE_SRC (bsrc);
   GDBusConnection *dbus = NULL;
@@ -259,16 +310,13 @@ gst_dbus_videosource_src_start (GstBaseSrc * bsrc)
   }
   caps = gst_caps_from_string (scaps);
   scaps = NULL;
-  if (!gst_base_src_set_caps (bsrc, caps)) {
-    GST_ERROR_OBJECT (src, "Failed to set caps");
-    goto done;
-  }
+  g_object_set (bsrc->capsfilter, "caps", caps, NULL);
 
   GST_INFO_OBJECT (src, "Received remote caps %" GST_PTR_FORMAT, caps);
   if (gst_video_info_from_caps (&video_info, caps)) {
     /* Best effort set the block size for raw video.  Really a proper parser or
      * payloading would be better.  Don't really care if it fails. */
-    gst_base_src_set_blocksize (bsrc, video_info.size);
+    g_object_set (src->socketsrc, "blocksize", video_info.size, NULL);
     GST_DEBUG_OBJECT (src, "Buffer size is %u", (unsigned) video_info.size);
   } else {
     GST_DEBUG_OBJECT (src, "Unknown buffer size");
@@ -292,7 +340,7 @@ gst_dbus_videosource_src_start (GstBaseSrc * bsrc)
     goto done;
   }
 
-  g_object_set (src, "socket", socket, NULL);
+  g_object_set (src->socketsrc, "socket", socket, NULL);
 
   ret = TRUE;
 
@@ -313,13 +361,11 @@ done:
 }
 
 static gboolean
-gst_dbus_videosource_src_stop (GstBaseSrc * bsrc)
+gst_dbus_videosource_src_stop (GstDBusVideoSourceSrc * bsrc)
 {
   GstDBusVideoSourceSrc *src = GST_DBUS_VIDEOSOURCE_SRC (bsrc);
 
   GDBusProxy *videosource = NULL;
-
-  gst_base_src_set_caps (bsrc, GST_CAPS_ANY);
 
   GST_OBJECT_LOCK (src);
   SWAP (videosource, src->videosource);
@@ -328,28 +374,4 @@ gst_dbus_videosource_src_stop (GstBaseSrc * bsrc)
   g_clear_object (&videosource);
 
   return TRUE;
-}
-
-/* will be called only between calls to start() and stop() */
-static gboolean
-gst_dbus_videosource_src_unlock (GstBaseSrc * bsrc)
-{
-  GstDBusVideoSourceSrc *src = GST_DBUS_VIDEOSOURCE_SRC (bsrc);
-
-  GST_DEBUG_OBJECT (src, "set to flushing");
-  g_cancellable_cancel (src->cancellable);
-
-  return GST_BASE_SRC_CLASS (parent_class)->unlock (bsrc);
-}
-
-/* will be called only between calls to start() and stop() */
-static gboolean
-gst_dbus_videosource_src_unlock_stop (GstBaseSrc * bsrc)
-{
-  GstDBusVideoSourceSrc *src = GST_DBUS_VIDEOSOURCE_SRC (bsrc);
-
-  GST_DEBUG_OBJECT (src, "unset flushing");
-  g_cancellable_reset (src->cancellable);
-
-  return GST_BASE_SRC_CLASS (parent_class)->unlock_stop (bsrc);
 }
