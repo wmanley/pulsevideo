@@ -28,6 +28,10 @@
 #include <gio/gunixfdmessage.h>
 #include "../build/gstnetcontrolmessagemeta.h"
 
+#include "sys/types.h"
+#include "sys/stat.h"
+#include "fcntl.h"
+
 static gboolean
 g_socketpair (GSocketFamily family, GSocketType type, GSocketProtocol protocol,
     GSocket * gsv[2], GError ** error);
@@ -171,6 +175,51 @@ GST_START_TEST (test_that_socketsrc_and_multisocketsink_are_symmetrical)
   setup_multisocketsink_and_socketsrc (&st);
   symmetry_test_assert_passthrough (&st,
       gst_buffer_new_wrapped (g_strdup ("hello"), 5));
+  symmetry_test_teardown (&st);
+}
+
+GST_END_TEST;
+
+GST_START_TEST (test_that_multisocketsink_and_socketsrc_preserve_meta)
+{
+  GstBuffer *buf;
+  GSocketControlMessage *msg, *outmsg;
+  SymmetryTest st = { 0 };
+  int devnull = -1;
+  gint *fds, fds_len = 0;
+  struct stat stat_orig, stat_new;
+
+  setup_multisocketsink_and_socketsrc (&st);
+
+  devnull = open ("/dev/null", O_RDONLY);
+
+  msg = g_unix_fd_message_new ();
+  g_unix_fd_message_append_fd((GUnixFDMessage*) msg, devnull, NULL);
+
+  buf = gst_buffer_new_wrapped (g_strdup ("hello"), 5);
+  gst_buffer_add_net_control_message_meta (buf, msg);
+
+  fail_unless (gst_app_src_push_buffer (st.sink_src, buf) == GST_FLOW_OK);
+
+  buf = gst_sample_get_buffer(gst_app_sink_pull_sample (st.src_sink));
+  fail_unless (buf != NULL);
+
+  outmsg = ((GstNetControlMessageMeta*) gst_buffer_get_meta (
+      buf, GST_NET_CONTROL_MESSAGE_META_API_TYPE))->message;
+  fail_unless (outmsg != NULL);
+  fail_unless (g_socket_control_message_get_msg_type (outmsg) == SCM_RIGHTS);
+
+  fds = g_unix_fd_message_steal_fds ((GUnixFDMessage*) outmsg, &fds_len);
+  fail_unless (fds_len == 1);
+
+  fail_unless (fstat (devnull, &stat_orig) == 0);
+  fail_unless (fstat (fds[0], &stat_new) == 0);
+  fail_unless (stat_orig.st_dev == stat_new.st_dev);
+  fail_unless (stat_orig.st_ino == stat_new.st_ino);
+
+  close (fds[0]);
+  close (devnull);
+
   symmetry_test_teardown (&st);
 }
 

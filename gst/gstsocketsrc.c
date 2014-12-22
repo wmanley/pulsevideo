@@ -48,6 +48,7 @@
 #include "config.h"
 #endif
 
+#include "gstnetcontrolmessagemeta.h"
 #include "gstsocketsrc.h"
 
 GST_DEBUG_CATEGORY_STATIC (socketsrc_debug);
@@ -152,6 +153,11 @@ gst_socket_src_fill (GstPushSrc * psrc, GstBuffer * outbuf)
   GError *err = NULL;
   GstMapInfo map;
   GSocket *socket;
+  GSocketControlMessage **messages;
+  gint num_messages = 0;
+  gint i;
+  GInputVector ivec;
+  gint flags = 0;
 
   src = GST_SOCKET_SRC (psrc);
 
@@ -169,9 +175,18 @@ gst_socket_src_fill (GstPushSrc * psrc, GstBuffer * outbuf)
   GST_LOG_OBJECT (src, "asked for a buffer");
 
   gst_buffer_map (outbuf, &map, GST_MAP_READWRITE);
-  rret = g_socket_receive_with_blocking (socket, (gchar *) map.data,
-        map.size, TRUE, src->cancellable, &err);
+  ivec.buffer = map.data;
+  ivec.size = map.size;
+  rret =
+      g_socket_receive_message (socket, NULL, &ivec, 1, &messages,
+      &num_messages, &flags, src->cancellable, &err);
   gst_buffer_unmap (outbuf, &map);
+
+  for (i = 0; i < num_messages; i++) {
+    gst_buffer_add_net_control_message_meta (outbuf, messages[i]);
+    g_object_unref (messages[i]);
+    messages[i] = NULL;
+  }
 
   if (rret == 0) {
     GST_DEBUG_OBJECT (src, "Connection closed");
