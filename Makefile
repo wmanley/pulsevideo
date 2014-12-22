@@ -3,7 +3,7 @@ all:
 
 -include config.mk
 
-PKG_DEPS=gstreamer-1.0 gstreamer-base-1.0 gio-2.0 gio-unix-2.0 gstreamer-video-1.0
+PKG_DEPS=gstreamer-1.0 gstreamer-base-1.0 gstreamer-allocators-1.0 gio-2.0 gio-unix-2.0 gstreamer-video-1.0
 
 prefix?=/usr/local
 exec_prefix?=$(prefix)
@@ -72,11 +72,31 @@ install-client : build/libgstpulsevideo.so
 clean:
 	git clean -fX
 
-tests/socketintegrationtest : tests/socketintegrationtest.c
-	gcc -o$@ $< -Wall -Werror $(CFLAGS) $$(pkg-config --cflags --libs $(PKG_DEPS) gstreamer-check-1.0 gstreamer-app-1.0) -Lbuild/ -lgstpulsevideo #gst/gstnetcontrolmessagemeta.c
+tests/socketintegrationtest : tests/socketintegrationtest.c build/gstnetcontrolmessagemeta.h build/libgstpulsevideo.so
+	gcc -o$@ $< -Wall -Werror $(CFLAGS) $$(pkg-config --cflags --libs $(PKG_DEPS) gstreamer-check-1.0 gstreamer-app-1.0) -Lbuild/ -lgstpulsevideo
 
-check: ./tests/socketintegrationtest build/libgstpulsevideo.so
+check: ./tests/socketintegrationtest
 	GST_PLUGIN_PATH=$(PWD)/build LD_LIBRARY_PATH=$(PWD)/build ./tests/socketintegrationtest
+
+check-gdb: ./tests/socketintegrationtest
+	GST_PLUGIN_PATH=$(PWD)/build LD_LIBRARY_PATH=$(PWD)/build CK_FORK=no G_DEBUG=fatal_warnings gdb ./tests/socketintegrationtest
+
+check-valgrind: ./tests/socketintegrationtest common/
+	GST_PLUGIN_PATH=$(PWD)/build \
+	G_SLICE=always-malloc \
+	LD_LIBRARY_PATH=$(PWD)/build \
+	G_DEBUG=fatal_warnings \
+	valgrind --tool=memcheck \
+	         --suppressions=./common/gst.supp \
+	         --leak-check=full \
+	         --trace-children=yes \
+	         --show-possibly-lost=no \
+	         --leak-resolution=high \
+	         --num-callers=20 \
+	         ./tests/socketintegrationtest
+
+common/ :
+	git clone git://anongit.freedesktop.org/gstreamer/common common
 
 # Can only be run from within a git clone of pulsevideo or VERSION (and the
 # list of files) won't be set correctly.

@@ -32,6 +32,19 @@
 #include "sys/stat.h"
 #include "fcntl.h"
 
+#define G_UNREF(x) \
+  do { \
+    if ( x ) \
+      g_object_unref ( x ); \
+    x = NULL; \
+  } while (0);
+#define GST_UNREF(x) \
+  do { \
+    if ( x ) \
+      gst_object_unref ( x ); \
+    x = NULL; \
+  } while (0);
+
 static gboolean
 g_socketpair (GSocketFamily family, GSocketType type, GSocketProtocol protocol,
     GSocket * gsv[2], GError ** error);
@@ -150,21 +163,22 @@ setup_multisocketsink_and_socketsrc (SymmetryTest * st)
 {
   GSocket *sockets[2] = { NULL, NULL };
   GError *err = NULL;
+  GstElement *socketsink = NULL, *socketsrc = NULL;
 
-  st->sink = gst_check_setup_element ("pvmultisocketsink");
-  st->src = gst_check_setup_element ("pvsocketsrc");
+  socketsink = gst_check_setup_element ("pvmultisocketsink");
+  socketsrc = gst_check_setup_element ("pvsocketsrc");
 
   fail_unless (g_socketpair (G_SOCKET_FAMILY_UNIX,
           G_SOCKET_TYPE_STREAM | SOCK_CLOEXEC, G_SOCKET_PROTOCOL_DEFAULT,
           sockets, &err));
 
-  g_object_set (st->src, "socket", sockets[0], NULL);
+  g_object_set (socketsrc, "socket", sockets[0], NULL);
   g_object_unref (sockets[0]);
   sockets[0] = NULL;
 
-  symmetry_test_setup (st, st->sink, st->src);
+  symmetry_test_setup (st, socketsink, socketsrc);
 
-  g_signal_emit_by_name (st->sink, "add", sockets[1], NULL);
+  g_signal_emit_by_name (socketsink, "add", sockets[1], NULL);
   g_object_unref (sockets[1]);
   sockets[1] = NULL;
 }
@@ -188,6 +202,7 @@ GST_START_TEST (test_that_multisocketsink_and_socketsrc_preserve_meta)
   int devnull = -1;
   gint *fds, fds_len = 0;
   struct stat stat_orig, stat_new;
+  GstSample *sample;
 
   setup_multisocketsink_and_socketsrc (&st);
 
@@ -198,10 +213,12 @@ GST_START_TEST (test_that_multisocketsink_and_socketsrc_preserve_meta)
 
   buf = gst_buffer_new_wrapped (g_strdup ("hello"), 5);
   gst_buffer_add_net_control_message_meta (buf, msg);
+  G_UNREF(msg);
 
   fail_unless (gst_app_src_push_buffer (st.sink_src, buf) == GST_FLOW_OK);
 
-  buf = gst_sample_get_buffer(gst_app_sink_pull_sample (st.src_sink));
+  sample = gst_app_sink_pull_sample (st.src_sink);
+  buf = gst_sample_get_buffer(sample);
   fail_unless (buf != NULL);
 
   outmsg = ((GstNetControlMessageMeta*) gst_buffer_get_meta (
@@ -211,6 +228,10 @@ GST_START_TEST (test_that_multisocketsink_and_socketsrc_preserve_meta)
 
   fds = g_unix_fd_message_steal_fds ((GUnixFDMessage*) outmsg, &fds_len);
   fail_unless (fds_len == 1);
+  gst_sample_unref (sample);
+  sample = NULL;
+  buf = NULL;
+  outmsg = NULL;
 
   fail_unless (fstat (devnull, &stat_orig) == 0);
   fail_unless (fstat (fds[0], &stat_new) == 0);
@@ -218,6 +239,7 @@ GST_START_TEST (test_that_multisocketsink_and_socketsrc_preserve_meta)
   fail_unless (stat_orig.st_ino == stat_new.st_ino);
 
   close (fds[0]);
+  g_free (fds);
   close (devnull);
 
   symmetry_test_teardown (&st);

@@ -153,7 +153,7 @@ gst_socket_src_fill (GstPushSrc * psrc, GstBuffer * outbuf)
   GError *err = NULL;
   GstMapInfo map;
   GSocket *socket;
-  GSocketControlMessage **messages;
+  GSocketControlMessage **messages = NULL;
   gint num_messages = 0;
   gint i;
   GInputVector ivec;
@@ -187,6 +187,7 @@ gst_socket_src_fill (GstPushSrc * psrc, GstBuffer * outbuf)
     g_object_unref (messages[i]);
     messages[i] = NULL;
   }
+  g_free (messages);
 
   if (rret == 0) {
     GST_DEBUG_OBJECT (src, "Connection closed");
