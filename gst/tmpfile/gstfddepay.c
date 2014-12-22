@@ -34,16 +34,18 @@
 #include "config.h"
 #endif
 
+#include "gstfddepay.h"
+#include "wire-protocol.h"
+#include "../gstnetcontrolmessagemeta.h"
+
 #include <gst/gst.h>
 #include <gst/base/gstbasetransform.h>
 #include <gst/allocators/gstdmabuf.h>
-#include <gst/unixfd/unixfd.h>
-
-#include "gstfddepay.h"
-#include "wire-protocol.h"
+#include <gio/gunixfdmessage.h>
 
 #include <fcntl.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 
@@ -168,8 +170,9 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
   GstFddepay *fddepay = GST_FDDEPAY (trans);
   FDMessage msg;
   GstMemory *dmabufmem = NULL;
+  GstNetControlMessageMeta * meta;
   int *fds = NULL;
-  int fd_count;
+  int fds_len = 0;
   int fd = -1;
 
   GST_DEBUG_OBJECT (fddepay, "transform_ip");
@@ -185,10 +188,19 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
 
   gst_buffer_extract (buf, 0, &msg, sizeof (msg));
 
-  gst_buffer_get_unix_fds (buf, &fds, &fd_count);
-  if (fd_count != 1) {
+  meta = ((GstNetControlMessageMeta*) gst_buffer_get_meta (
+      buf, GST_NET_CONTROL_MESSAGE_META_API_TYPE));
+
+  if (meta &&
+      g_socket_control_message_get_msg_type (meta->message) == SCM_RIGHTS) {
+    fds = g_unix_fd_message_steal_fds ((GUnixFDMessage*) meta->message,
+        &fds_len);
+    meta = NULL;
+  }
+
+  if (fds == NULL || fds_len != 1) {
     GST_WARNING_OBJECT (fddepay, "fddepay: Expect to receive 1 FD for each "
-        "buffer, received %i", fd_count);
+        "buffer, received %i", fds_len);
     goto error;
   }
   fd = dup (fds[0]);
@@ -209,7 +221,7 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
 
   gst_buffer_remove_all_memory (buf);
   gst_buffer_remove_meta (buf,
-      gst_buffer_get_meta (buf, GST_UNIX_FD_META_API_TYPE));
+      gst_buffer_get_meta (buf, GST_NET_CONTROL_MESSAGE_META_API_TYPE));
   gst_buffer_append_memory (buf, dmabufmem);
   dmabufmem = NULL;
 

@@ -107,10 +107,10 @@ sq = $(subst ','\'',$(1)) # function to escape single quotes (')
 	    echo '$(flags)' > $@; \
 	fi
 
-build/tcp :
+build/tcp build/tmpfile :
 	mkdir -p $@
 
-build/%.c : gst/%.c Makefile | build/tcp
+build/%.c : gst/%.c Makefile | build/tcp build/tmpfile
 	sed -e 's/GstMulti/PvMulti/g' \
 	    -e 's/GST_MULTI/PV_MULTI/g' \
 	    -e 's/gst_multi/pv_multi/g' \
@@ -122,8 +122,9 @@ build/%.c : gst/%.c Makefile | build/tcp
 	    $< \
 	| sed -e 's/include "pv/include "gst/g' \
 	      -e 's,include "tcp/pv,include "tcp/gst,g' \
+	      -e 's,include "tmpfile/pv,include "tmpfile/gst,g' \
 	      >$@
-build/%.h : gst/%.h Makefile | build/tcp
+build/%.h : gst/%.h Makefile | build/tcp build/tmpfile
 	sed -e 's/GstMulti/PvMulti/g' \
 	    -e 's/GST_MULTI/PV_MULTI/g' \
 	    -e 's/gst_multi/pv_multi/g' \
@@ -135,6 +136,7 @@ build/%.h : gst/%.h Makefile | build/tcp
 	    $< \
 	| sed -e 's/include "pv/include "gst/g' \
 	      -e 's,include "tcp/pv,include "tcp/gst,g' \
+	      -e 's,include "tmpfile/pv,include "tmpfile/gst,g' \
 	      >$@
 
 build/libgstpulsevideo.so : \
@@ -148,6 +150,16 @@ build/libgstpulsevideo.so : \
 		build/gstvideosource1.c \
 		build/gstvideosource1.h \
 		build/tcp/gstmultihandlesink.h \
+		build/tcp/gstmultihandlesink.c \
+		build/tcp/gstmultisocketsink.h \
+		build/tcp/gstmultisocketsink.c \
+		build/tmpfile/gstfddepay.c \
+		build/tmpfile/gstfddepay.h \
+		build/tmpfile/gstfdpay.c \
+		build/tmpfile/gstfdpay.h \
+		build/tmpfile/gsttmpfileallocator.c \
+		build/tmpfile/gsttmpfileallocator.h \
+		build/tmpfile/wire-protocol.h \
 		build/tcp/gstmultihandlesink.c \
 		build/tcp/gstmultisocketsink.h \
 		build/tcp/gstmultisocketsink.c \

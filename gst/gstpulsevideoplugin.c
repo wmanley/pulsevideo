@@ -24,6 +24,8 @@
 #include "gstsocketsrc.h"
 #include "gstdbusvideosourcesrc.h"
 #include "tcp/gstmultisocketsink.h"
+#include "tmpfile/gstfddepay.h"
+#include "tmpfile/gstfdpay.h"
 
 static gboolean
 plugin_init (GstPlugin * plugin)
@@ -34,7 +36,11 @@ plugin_init (GstPlugin * plugin)
     gst_element_register (plugin, "dbusvideosourcesrc", GST_RANK_NONE,
           GST_TYPE_DBUS_VIDEOSOURCE_SRC) &&
     gst_element_register (plugin, "pvmultisocketsink", GST_RANK_NONE,
-          GST_TYPE_MULTI_SOCKET_SINK);
+          GST_TYPE_MULTI_SOCKET_SINK) &&
+    gst_element_register (plugin, "pvfdpay", GST_RANK_NONE,
+          GST_TYPE_FDPAY) &&
+    gst_element_register (plugin, "pvfddepay", GST_RANK_NONE,
+          GST_TYPE_FDDEPAY);
 }
 
 GST_PLUGIN_DEFINE (GST_VERSION_MAJOR,

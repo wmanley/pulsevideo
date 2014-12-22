@@ -45,9 +45,11 @@
 #include <gst/gst.h>
 #include <gst/allocators/gstdmabuf.h>
 #include <gst/base/gstbasetransform.h>
-#include <gst/unixfd/unixfd.h>
 #include "gstfdpay.h"
 #include "gsttmpfileallocator.h"
+
+#include "../gstnetcontrolmessagemeta.h"
+#include <gio/gunixfdmessage.h>
 
 #include <fcntl.h>
 #include <string.h>
@@ -55,6 +57,20 @@
 
 GST_DEBUG_CATEGORY_STATIC (gst_fdpay_debug_category);
 #define GST_CAT_DEFAULT gst_fdpay_debug_category
+
+#define G_UNREF(x) \
+  do { \
+    if ( x ) \
+      g_object_unref ( x ); \
+    x = NULL; \
+  } while (0);
+#define GST_UNREF(x) \
+  do { \
+    if ( x ) \
+      gst_object_unref ( x ); \
+    x = NULL; \
+  } while (0);
+
 
 /* prototypes */
 
@@ -132,10 +148,7 @@ gst_fdpay_dispose (GObject * object)
   GST_DEBUG_OBJECT (fdpay, "dispose");
 
   /* clean up as possible.  may be called multiple times */
-  if (fdpay->allocator) {
-    g_object_unref (fdpay->allocator);
-    fdpay->allocator = NULL;
-  }
+  GST_UNREF(fdpay->allocator);
 
   G_OBJECT_CLASS (gst_fdpay_parent_class)->dispose (object);
 }
@@ -214,6 +227,8 @@ gst_fdpay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
   GstMemory *dmabufmem;
   GstMemory *msgmem;
   GstMapInfo info;
+  GError *err = NULL;
+  GSocketControlMessage *fdmsg = NULL;
   FDMessage msg = { 0, 0 };
   int fd;
 
@@ -228,18 +243,26 @@ gst_fdpay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
   fd = dup (gst_dmabuf_memory_get_fd (dmabufmem));
   fcntl (fd, F_SETFD, FD_CLOEXEC);
 
-  gst_buffer_add_unix_fd_meta (buf, fd);
+  fdmsg = g_unix_fd_message_new ();
+  if (!g_unix_fd_message_append_fd((GUnixFDMessage*) fdmsg, fd, &err)) {
+    goto append_fd_failed;
+  }
+  gst_buffer_add_net_control_message_meta (buf, fdmsg);
 
   gst_base_transform_get_allocator (trans, &downstream_allocator, NULL);
   msgmem = gst_allocator_alloc (downstream_allocator, sizeof (FDMessage), NULL);
   gst_memory_map (msgmem, &info, GST_MAP_WRITE);
   memcpy (info.data, &msg, sizeof (msg));
   gst_memory_unmap (msgmem, &info);
-  if (downstream_allocator)
-    g_object_unref (downstream_allocator);
+  GST_UNREF (downstream_allocator);
 
   gst_buffer_append_memory (buf, msgmem);
   msgmem = NULL;
 
   return GST_FLOW_OK;
+append_fd_failed:
+  GST_WARNING_OBJECT (trans, "Appending fd failed: %s", err->message);
+  g_error_free (err);
+  G_UNREF (fdmsg);
+  return GST_FLOW_ERROR;
 }
