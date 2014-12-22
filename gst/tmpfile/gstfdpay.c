@@ -236,12 +236,14 @@ gst_fdpay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
 
   fd = dup (gst_dmabuf_memory_get_fd (dmabufmem));
   fcntl (fd, F_SETFD, FD_CLOEXEC);
+  gst_memory_unref(dmabufmem);
 
   fdmsg = g_unix_fd_message_new ();
   if (!g_unix_fd_message_append_fd((GUnixFDMessage*) fdmsg, fd, &err)) {
     goto append_fd_failed;
   }
   gst_buffer_add_net_control_message_meta (buf, fdmsg);
+  g_clear_object (&fdmsg);
 
   gst_base_transform_get_allocator (trans, &downstream_allocator, NULL);
   msgmem = gst_allocator_alloc (downstream_allocator, sizeof (FDMessage), NULL);
