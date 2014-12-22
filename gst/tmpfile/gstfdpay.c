@@ -218,13 +218,12 @@ gst_fdpay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
 {
   GstFdpay *fdpay = GST_FDPAY (trans);
   GstAllocator *downstream_allocator = NULL;
-  GstMemory *dmabufmem;
+  GstMemory *dmabufmem = NULL;
   GstMemory *msgmem;
   GstMapInfo info;
   GError *err = NULL;
   GSocketControlMessage *fdmsg = NULL;
   FDMessage msg = { 0, 0 };
-  int fd;
 
   GST_DEBUG_OBJECT (fdpay, "transform_ip");
 
@@ -234,14 +233,14 @@ gst_fdpay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
   msg.size = dmabufmem->size;
   msg.offset = dmabufmem->offset;
 
-  fd = dup (gst_dmabuf_memory_get_fd (dmabufmem));
-  fcntl (fd, F_SETFD, FD_CLOEXEC);
-  gst_memory_unref(dmabufmem);
-
   fdmsg = g_unix_fd_message_new ();
-  if (!g_unix_fd_message_append_fd((GUnixFDMessage*) fdmsg, fd, &err)) {
+  if (!g_unix_fd_message_append_fd((GUnixFDMessage*) fdmsg,
+          gst_dmabuf_memory_get_fd (dmabufmem), &err)) {
     goto append_fd_failed;
   }
+  gst_memory_unref(dmabufmem);
+  dmabufmem = NULL;
+
   gst_buffer_add_net_control_message_meta (buf, fdmsg);
   g_clear_object (&fdmsg);
 
@@ -258,6 +257,7 @@ gst_fdpay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
   return GST_FLOW_OK;
 append_fd_failed:
   GST_WARNING_OBJECT (trans, "Appending fd failed: %s", err->message);
+  gst_memory_unref(dmabufmem);
   g_clear_error (&err);
   g_clear_object (&fdmsg);
   return GST_FLOW_ERROR;
