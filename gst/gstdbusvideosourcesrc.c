@@ -340,7 +340,7 @@ gst_dbus_videosource_src_start (GstDBusVideoSourceSrc * bsrc)
     goto done;
   }
 
-  g_object_set (src->socketsrc, "socket", socket, NULL);
+  g_object_set (src->socketsrc, "socket", socket, "do-timestamp", TRUE, NULL);
 
   ret = TRUE;
 
