@@ -107,7 +107,11 @@ gst_tmpfile_allocator_alloc (GstAllocator * allocator, gsize size,
   GstTmpFileAllocator *alloc = (GstTmpFileAllocator *) allocator;
   GstMemory *mem;
   int fd;
-  gsize maxsize =
+  gsize maxsize;
+
+  g_return_val_if_fail (params != NULL, NULL);
+
+  maxsize =
       pad (size + pad (params->prefix, params->align) + params->padding,
       PAGE_ALIGN);
 

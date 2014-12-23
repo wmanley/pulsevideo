@@ -222,9 +222,10 @@ gst_fdpay_get_dmabuf_memory (GstFdpay * tmpfilepay, GstBuffer * buffer)
     mem = gst_buffer_get_memory (buffer, 0);
   else {
     GstMapInfo info;
+    GstAllocationParams params = {0, 0, 0, 0};
     gsize size = gst_buffer_get_size (buffer);
     GST_INFO_OBJECT (tmpfilepay, "Buffer cannot be payloaded without copying");
-    mem = gst_allocator_alloc (tmpfilepay->allocator, size, NULL);
+    mem = gst_allocator_alloc (tmpfilepay->allocator, size, &params);
     if (!gst_memory_map (mem, &info, GST_MAP_WRITE))
       return NULL;
     gst_buffer_extract (buffer, 0, info.data, size);
