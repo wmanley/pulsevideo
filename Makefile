@@ -127,7 +127,7 @@ sq = $(subst ','\'',$(1)) # function to escape single quotes (')
 	    echo '$(flags)' > $@; \
 	fi
 
-build/tcp build/tmpfile :
+build/tcp build/tmpfile build/debugutils :
 	mkdir -p $@
 
 build/%.c : gst/%.c Makefile | build/tcp build/tmpfile
@@ -139,12 +139,16 @@ build/%.c : gst/%.c Makefile | build/tcp build/tmpfile
 	    -e 's/GstSocket/PvSocket/g' \
 	    -e 's/gst_socket/pv_socket/g' \
 	    -e 's/GST_SOCKET/PV_SOCKET/g' \
+	    -e 's/GstWatchdog/PvWatchdog/g' \
+	    -e 's/gst_watchdog/pv_watchdog/g' \
+	    -e 's/GST_WATCHDOG/PV_WATCHDOG/g' \
+	    -e 's/GST_TYPE_WATCHDOG/PV_TYPE_WATCHDOG/g' \
 	    $< \
 	| sed -e 's/include "pv/include "gst/g' \
 	      -e 's,include "tcp/pv,include "tcp/gst,g' \
 	      -e 's,include "tmpfile/pv,include "tmpfile/gst,g' \
 	      >$@
-build/%.h : gst/%.h Makefile | build/tcp build/tmpfile
+build/%.h : gst/%.h Makefile | build/debugutils build/tcp build/tmpfile
 	sed -e 's/GstMulti/PvMulti/g' \
 	    -e 's/GST_MULTI/PV_MULTI/g' \
 	    -e 's/gst_multi/pv_multi/g' \
@@ -153,6 +157,10 @@ build/%.h : gst/%.h Makefile | build/tcp build/tmpfile
 	    -e 's/GstSocket/PvSocket/g' \
 	    -e 's/gst_socket/pv_socket/g' \
 	    -e 's/GST_SOCKET/PV_SOCKET/g' \
+	    -e 's/GstWatchdog/PvWatchdog/g' \
+	    -e 's/gst_watchdog/pv_watchdog/g' \
+	    -e 's/GST_WATCHDOG/PV_WATCHDOG/g' \
+	    -e 's/GST_TYPE_WATCHDOG/PV_TYPE_WATCHDOG/g' \
 	    $< \
 	| sed -e 's/include "pv/include "gst/g' \
 	      -e 's,include "tcp/pv,include "tcp/gst,g' \
@@ -169,6 +177,8 @@ build/libgstpulsevideo.so : \
 		build/gstsocketsrc.c \
 		build/gstvideosource1.c \
 		build/gstvideosource1.h \
+		build/debugutils/gstwatchdog.h \
+		build/debugutils/gstwatchdog.c \
 		build/tcp/gstmultihandlesink.h \
 		build/tcp/gstmultihandlesink.c \
 		build/tcp/gstmultisocketsink.h \

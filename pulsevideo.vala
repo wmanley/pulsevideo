@@ -77,7 +77,7 @@ void create_videosource(string source, string caps, GLib.DBusConnection dbus,
 {
     // Creating pipeline and elements
     var pipeline = (Gst.Pipeline) Gst.parse_launch(
-        source + " ! watchdog ! videoconvert ! " + caps + " ! pvfdpay "
+        source + " ! pvwatchdog ! videoconvert ! " + caps + " ! pvfdpay "
         + " ! pvmultisocketsink buffers-max=2 buffers-soft-max=1 "
         + "recover-policy=latest sync-method=latest name=sink sync=false "
         + "enable-last-sample=false");
