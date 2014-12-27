@@ -75,13 +75,18 @@ clean:
 tests/socketintegrationtest : tests/socketintegrationtest.c build/gstnetcontrolmessagemeta.h build/libgstpulsevideo.so
 	gcc -o$@ $< -Wall -Werror $(CFLAGS) $$(pkg-config --cflags --libs $(PKG_DEPS) gstreamer-check-1.0 gstreamer-app-1.0) -Lbuild/ -lgstpulsevideo
 
-check: ./tests/socketintegrationtest
+check: check-pytest check-gst check-gst-valgrind
+
+check-pytest :
+	py.test -vv tests/
+
+check-gst: ./tests/socketintegrationtest
 	GST_PLUGIN_PATH=$(PWD)/build LD_LIBRARY_PATH=$(PWD)/build ./tests/socketintegrationtest
 
-check-gdb: ./tests/socketintegrationtest
+check-gst-gdb: ./tests/socketintegrationtest
 	GST_PLUGIN_PATH=$(PWD)/build LD_LIBRARY_PATH=$(PWD)/build CK_FORK=no G_DEBUG=fatal_warnings gdb ./tests/socketintegrationtest
 
-check-valgrind: ./tests/socketintegrationtest common/
+check-gst-valgrind: ./tests/socketintegrationtest common/
 	GST_PLUGIN_PATH=$(PWD)/build \
 	G_SLICE=always-malloc \
 	LD_LIBRARY_PATH=$(PWD)/build \
