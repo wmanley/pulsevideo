@@ -160,7 +160,9 @@ gst_dbus_videosource_src_set_property (GObject * object, guint prop_id,
     case PROP_DBUS_CONNECTION: {
       GDBusConnection *conn;
       conn = g_value_get_object (value);
+      GST_OBJECT_LOCK (src);
       SWAP (conn, src->dbus);
+      GST_OBJECT_UNLOCK (src);
       g_clear_object (&conn);
       break;
     }
