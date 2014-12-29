@@ -263,9 +263,8 @@ failure:
 
 /* create a socket for connecting to remote server */
 static gboolean
-gst_dbus_videosource_src_start (GstDBusVideoSourceSrc * bsrc)
+gst_dbus_videosource_src_start (GstDBusVideoSourceSrc * src)
 {
-  GstDBusVideoSourceSrc *src = GST_DBUS_VIDEOSOURCE_SRC (bsrc);
   GDBusConnection *dbus = NULL;
   gchar *bus_name = NULL;
   gchar *object_path = NULL;
@@ -312,7 +311,7 @@ gst_dbus_videosource_src_start (GstDBusVideoSourceSrc * bsrc)
   }
   caps = gst_caps_from_string (scaps);
   scaps = NULL;
-  g_object_set (bsrc->capsfilter, "caps", caps, NULL);
+  g_object_set (src->capsfilter, "caps", caps, NULL);
 
   GST_INFO_OBJECT (src, "Received remote caps %" GST_PTR_FORMAT, caps);
   if (gst_video_info_from_caps (&video_info, caps)) {
