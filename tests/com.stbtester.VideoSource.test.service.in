@@ -1,3 +1,3 @@
 [D-BUS Service]
 Name=com.stbtester.VideoSource.test
-Exec=/bin/bash -c '@PULSEVIDEO@ --bus-name-suffix=test >@TMPDIR@/pulsevideo.log'
+Exec=/bin/bash -c "@PULSEVIDEO@ >@TMPDIR@/pulsevideo.log"

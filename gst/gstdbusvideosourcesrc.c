@@ -55,6 +55,12 @@ enum
   PROP_OBJECT_PATH
 };
 
+typedef enum {
+  PV_INIT_SUCCESS = 0,
+  PV_INIT_FAILURE,
+  PV_INIT_NOOBJECT,
+} PvInitResult;
+
 #define gst_dbus_videosource_src_parent_class parent_class
 G_DEFINE_TYPE (GstDBusVideoSourceSrc, gst_dbus_videosource_src, GST_TYPE_BIN);
 
@@ -68,7 +74,10 @@ static void gst_dbus_videosource_src_set_property (GObject * object, guint prop_
     const GValue * value, GParamSpec * pspec);
 static void gst_dbus_videosource_src_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec);
+static PvInitResult gst_dbus_videosource_src_reinit (
+    GstDBusVideoSourceSrc * src, GError **error);
 
+static void on_socket_eos (GstElement *socketsrc, gpointer user_data);
 static GstStateChangeReturn gst_dbus_videosource_src_change_state (
     GstElement * element, GstStateChange transition);
 
@@ -112,6 +121,26 @@ gst_dbus_videosource_src_class_init (GstDBusVideoSourceSrcClass * klass)
 }
 
 static void
+on_socket_eos (GstElement *socketsrc, gpointer user_data)
+{
+  GstDBusVideoSourceSrc *src = (GstDBusVideoSourceSrc *) user_data;
+
+  GST_INFO_OBJECT (src, "VideoSource has gone away, retrying connection");
+
+  switch (gst_dbus_videosource_src_reinit (src, NULL)) {
+  case PV_INIT_SUCCESS:
+    GST_INFO_OBJECT (src, "Successfully reconnected");
+    break;
+  case PV_INIT_NOOBJECT:
+    GST_INFO_OBJECT (src, "Videosource has gone away for good, EOS");
+    break;
+  case PV_INIT_FAILURE:
+    GST_WARNING_OBJECT (src, "Error reconnecting to Videosource");
+    break;
+  }
+}
+
+static void
 gst_dbus_videosource_src_init (GstDBusVideoSourceSrc * this)
 {
   GstPad *pad;
@@ -131,6 +160,8 @@ gst_dbus_videosource_src_init (GstDBusVideoSourceSrc * this)
   gst_element_add_pad (GST_ELEMENT (this), gst_ghost_pad_new ("src", pad));
   gst_object_unref (pad);
 
+  g_signal_connect (this->socketsrc, "on-socket-eos",
+      G_CALLBACK (on_socket_eos), this);
 }
 
 static void
@@ -259,17 +290,16 @@ failure:
   }
 }
 
-/* create a socket for connecting to remote server */
-static gboolean
-gst_dbus_videosource_src_start (GstDBusVideoSourceSrc * src)
+static PvInitResult
+gst_dbus_videosource_src_reinit (GstDBusVideoSourceSrc * src, GError **error)
 {
   GDBusConnection *dbus = NULL;
   gchar *bus_name = NULL;
   gchar *object_path = NULL;
+  GError *err = NULL;
 
   GstVideoSource1 *videosource = NULL;
-  GError *error = NULL;
-  gboolean ret = FALSE;
+  gboolean ret = PV_INIT_FAILURE;
   const gchar *scaps = NULL;
   GstCaps *caps = NULL;
   GUnixFDList *fdlist = NULL;
@@ -284,24 +314,27 @@ gst_dbus_videosource_src_start (GstDBusVideoSourceSrc * src)
   GST_OBJECT_UNLOCK (src);
 
   if (!dbus) {
-    dbus = g_bus_get_sync (G_BUS_TYPE_SESSION, src->cancellable, &error);
+    dbus = g_bus_get_sync (G_BUS_TYPE_SESSION, src->cancellable, &err);
     if (!dbus) {
-      GST_ERROR_OBJECT (src, "Failed connecting to DBus: %s", error->message);
+      GST_ELEMENT_ERROR (src, RESOURCE, NOT_FOUND, (NULL),
+          ("Failed connecting to DBus: %s", err->message));
       goto done;
     }
   }
 
   videosource = gst_video_source1_proxy_new_sync (dbus,
-      G_DBUS_PROXY_FLAGS_NONE, bus_name, object_path, src->cancellable, &error);
+      G_DBUS_PROXY_FLAGS_NONE, bus_name, object_path, src->cancellable, &err);
   if (!videosource) {
-    GST_ERROR_OBJECT (src, "Could not create VideoSource DBus proxy: %s",
-        error->message);
+    GST_ELEMENT_ERROR (src, RESOURCE, NOT_FOUND, (NULL),
+        ("Could not create VideoSource DBus proxy: %s", err->message));
     goto done;
   }
 
   scaps = gst_video_source1_get_caps (videosource);
   if (!scaps) {
-    GST_ERROR_OBJECT (src, "Could not read remote caps from %s on %s",
+    ret = PV_INIT_NOOBJECT;
+    g_set_error(&err, g_quark_from_static_string ("pv-read-caps-error-quark"),
+        PV_INIT_FAILURE, "Could not read remote caps from %s on %s",
         object_path, bus_name);
     goto done;
   }
@@ -314,23 +347,22 @@ gst_dbus_videosource_src_start (GstDBusVideoSourceSrc * src)
   caps = NULL;
 
   if (!gst_video_source1_call_attach_sync (videosource, NULL, NULL, &fdlist,
-          src->cancellable, &error)) {
-    GST_ERROR_OBJECT (videosource, "Call to attach() failed: %s",
-        error->message);
+          src->cancellable, &err)) {
+    ret = PV_INIT_NOOBJECT;
     goto done;
   }
 
   fds = g_unix_fd_list_steal_fds (fdlist, NULL);
-  socket = g_socket_new_from_fd (fds[0], &error);
+  socket = g_socket_new_from_fd (fds[0], &err);
   if (!socket) {
-    GST_ERROR_OBJECT (videosource, "Failed to create socket: %s",
-        error->message);
+    GST_ELEMENT_ERROR (videosource, RESOURCE, FAILED,
+        (NULL), ("Failed to create socket: %s", err->message));
     goto done;
   }
 
   g_object_set (src->socketsrc, "socket", socket, "do-timestamp", TRUE, NULL);
 
-  ret = TRUE;
+  ret = PV_INIT_SUCCESS;
 
 done:
   g_clear_object (&dbus);
@@ -342,8 +374,36 @@ done:
   g_free (object_path);
   g_free (fds);
 
-  if (error)
-    g_error_free (error);
+  if (err)
+    g_propagate_error (error, err);
+
+  return ret;
+}
+
+/* create a socket for connecting to remote server */
+static gboolean
+gst_dbus_videosource_src_start (GstDBusVideoSourceSrc * src)
+{
+  GError *error = NULL;
+  gboolean ret = FALSE;
+
+  switch (gst_dbus_videosource_src_reinit (src, &error)) {
+  case PV_INIT_SUCCESS:
+    ret = TRUE;
+    break;
+  case PV_INIT_NOOBJECT:
+    GST_ELEMENT_ERROR (src, RESOURCE, NOT_FOUND, (NULL),
+        ("Call to VideoSource failed: %s", error->message));
+    ret = FALSE;
+    break;
+  case PV_INIT_FAILURE:
+    GST_ELEMENT_ERROR (src, RESOURCE, NOT_FOUND, (NULL),
+        ("Call to VideoSource failed: %s", error->message));
+    ret = FALSE;
+    break;
+  default:
+    g_return_val_if_reached(FALSE);
+  }
 
   return ret;
 }
