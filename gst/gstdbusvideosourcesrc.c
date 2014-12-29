@@ -35,7 +35,6 @@
 #include "gstvideosource1.h"
 #include <string.h>
 #include <gio/gunixfdlist.h>
-#include <gst/video/video.h>
 
 GST_DEBUG_CATEGORY_STATIC (dbusvideosourcesrc_debug);
 #define GST_CAT_DEFAULT dbusvideosourcesrc_debug
@@ -278,8 +277,6 @@ gst_dbus_videosource_src_start (GstDBusVideoSourceSrc * src)
   gint *fds = NULL;
   GSocket *socket = NULL;
   
-  GstVideoInfo video_info;
-
   GST_OBJECT_LOCK (src);
   if (src->dbus)
     dbus = g_object_ref (src->dbus);
@@ -314,15 +311,6 @@ gst_dbus_videosource_src_start (GstDBusVideoSourceSrc * src)
   g_object_set (src->capsfilter, "caps", caps, NULL);
 
   GST_INFO_OBJECT (src, "Received remote caps %" GST_PTR_FORMAT, caps);
-  if (gst_video_info_from_caps (&video_info, caps)) {
-    /* Best effort set the block size for raw video.  Really a proper parser or
-     * payloading would be better.  Don't really care if it fails. */
-    g_object_set (src->socketsrc, "blocksize", video_info.size, NULL);
-    GST_DEBUG_OBJECT (src, "Buffer size is %u", (unsigned) video_info.size);
-  } else {
-    GST_DEBUG_OBJECT (src, "Unknown buffer size");
-  }
-
   gst_caps_unref (caps);
   caps = NULL;
 
