@@ -35,6 +35,7 @@
 #include "gstvideosource1.h"
 #include <string.h>
 #include <gio/gunixfdlist.h>
+#include <gst/base/gstbasesrc.h>
 
 GST_DEBUG_CATEGORY_STATIC (dbusvideosourcesrc_debug);
 #define GST_CAT_DEFAULT dbusvideosourcesrc_debug
@@ -117,6 +118,7 @@ gst_dbus_videosource_src_init (GstDBusVideoSourceSrc * this)
 
   this->cancellable = g_cancellable_new ();
   this->socketsrc = gst_element_factory_make ("pvsocketsrc", NULL);
+  gst_base_src_set_live (GST_BASE_SRC (this->socketsrc), TRUE);
   gst_bin_add (GST_BIN (this), gst_object_ref (this->socketsrc));
   this->fddepay = gst_element_factory_make ("pvfddepay", NULL);
   gst_bin_add (GST_BIN (this), gst_object_ref (this->fddepay));
@@ -247,9 +249,6 @@ gst_dbus_videosource_src_change_state (GstElement * element,
     gst_dbus_videosource_src_stop ((GstDBusVideoSourceSrc *)element);
   }
 
-  if (transition == GST_STATE_CHANGE_READY_TO_PAUSED) {
-    result = GST_STATE_CHANGE_NO_PREROLL;
-  }
   return result;
 
   /* ERRORS */
