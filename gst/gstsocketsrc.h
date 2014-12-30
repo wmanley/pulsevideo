@@ -54,6 +54,9 @@ struct _GstSocketSrc {
 
 struct _GstSocketSrcClass {
   GstPushSrcClass parent_class;
+
+  /* signals */
+  void  (*on_socket_eos)(GstElement*);
 };
 
 GType gst_socket_src_get_type (void);

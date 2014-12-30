@@ -318,6 +318,72 @@ GST_START_TEST (test_that_zerocopy_doesnt_leak_fds)
 
 GST_END_TEST
 
+static void
+on_socket_eos (GstElement *socketsrc, gpointer user_data)
+{
+  GSocket * socket = (GSocket*) user_data;
+
+  g_object_set (socketsrc, "socket", socket, NULL);
+}
+
+GST_START_TEST (test_that_we_can_provide_new_socketsrc_sockets_during_signal)
+{
+  GSocket *sockets[4] = { NULL, NULL };
+
+  GstPipeline * pipeline = NULL;
+  GstAppSink * appsink = NULL;
+  GstElement * socketsrc = NULL;
+  GstSample * sample = NULL;
+
+  socketsrc = gst_check_setup_element ("pvsocketsrc");
+
+  fail_unless (g_socketpair (G_SOCKET_FAMILY_UNIX,
+          G_SOCKET_TYPE_STREAM | SOCK_CLOEXEC, G_SOCKET_PROTOCOL_DEFAULT,
+          &sockets[0], NULL));
+
+  fail_unless (g_socket_send (sockets[0], "hello", 5, NULL, NULL) == 5);
+  fail_unless (g_socket_shutdown (sockets[0], FALSE, TRUE, NULL));
+
+  fail_unless (g_socketpair (G_SOCKET_FAMILY_UNIX,
+          G_SOCKET_TYPE_STREAM | SOCK_CLOEXEC, G_SOCKET_PROTOCOL_DEFAULT,
+          &sockets[2], NULL));
+  fail_unless (g_socket_send (sockets[2], "goodbye", 7, NULL, NULL) == 7);
+  fail_unless (g_socket_shutdown (sockets[2], FALSE, TRUE, NULL));
+
+  g_object_set (socketsrc, "socket", sockets[1], NULL);
+
+  g_signal_connect (socketsrc, "on-socket-eos", G_CALLBACK (on_socket_eos),
+      sockets[3]);
+
+  pipeline = (GstPipeline*) gst_pipeline_new (NULL);
+  appsink = GST_APP_SINK (gst_check_setup_element ("appsink"));
+  gst_bin_add_many (GST_BIN (pipeline), socketsrc, GST_ELEMENT (appsink), NULL);
+  fail_unless (gst_element_link_many (socketsrc, GST_ELEMENT (appsink), NULL));
+
+  gst_element_set_state (GST_ELEMENT (pipeline), GST_STATE_PLAYING);
+
+  fail_unless ((sample = gst_app_sink_pull_sample (appsink)) != NULL);
+  gst_buffer_memcmp (gst_sample_get_buffer (sample), 0, "hello", 5);
+  gst_sample_unref (sample);
+
+  fail_unless ((sample = gst_app_sink_pull_sample (appsink)) != NULL);
+  gst_buffer_memcmp (gst_sample_get_buffer (sample), 0, "goodbye", 7);
+  gst_sample_unref (sample);
+
+  fail_unless (NULL == gst_app_sink_pull_sample (appsink));
+  fail_unless (gst_app_sink_is_eos (appsink));
+
+  gst_element_set_state (GST_ELEMENT (pipeline), GST_STATE_NULL);
+  g_clear_object (&sockets[0]);
+  g_clear_object (&sockets[1]);
+  g_clear_object (&sockets[2]);
+  g_clear_object (&sockets[3]);
+  gst_object_unref (pipeline);
+}
+
+GST_END_TEST
+
+
 static Suite *
 socketintegrationtest_suite (void)
 {
@@ -333,6 +399,8 @@ socketintegrationtest_suite (void)
       test_that_fdpay_and_fddepay_are_symmetrical);
   tcase_add_test (tc_chain,
       test_that_zerocopy_doesnt_leak_fds);
+  tcase_add_test (tc_chain,
+      test_that_we_can_provide_new_socketsrc_sockets_during_signal);
 
   return s;
 }
