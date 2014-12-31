@@ -167,7 +167,7 @@ gst_socket_src_fill (GstPushSrc * psrc, GstBuffer * outbuf)
   gssize rret;
   GError *err = NULL;
   GstMapInfo map;
-  GSocket *socket;
+  GSocket *socket = NULL;
   GSocketControlMessage **messages = NULL;
   gint num_messages = 0;
   gint i;
@@ -178,14 +178,13 @@ gst_socket_src_fill (GstPushSrc * psrc, GstBuffer * outbuf)
 
   GST_OBJECT_LOCK (src);
 
-  socket = src->socket;
-  if (socket == NULL) {
-    GST_OBJECT_UNLOCK (src);
-    goto no_socket;
-  }
-  g_object_ref (socket);
+  if (src->socket)
+    socket = g_object_ref (src->socket);
 
   GST_OBJECT_UNLOCK (src);
+
+  if (socket == NULL)
+    goto no_socket;
 
   GST_LOG_OBJECT (src, "asked for a buffer");
 
@@ -258,9 +257,10 @@ retry:
         GST_TIME_ARGS (GST_BUFFER_DURATION (outbuf)),
         GST_BUFFER_OFFSET (outbuf), GST_BUFFER_OFFSET_END (outbuf));
   }
-  g_clear_error (&err);
 
-  g_object_unref (socket);
+  g_clear_error (&err);
+  g_clear_object (&socket);
+
   return ret;
 
 no_socket:
@@ -283,8 +283,7 @@ gst_socket_src_set_property (GObject * object, guint prop_id,
       GST_OBJECT_LOCK (socketsrc);
       SWAP (socket, socketsrc->socket);
       GST_OBJECT_UNLOCK (socketsrc);
-      if (socket)
-        g_object_unref (socket);
+      g_clear_object (&socket);
       break;
     }
     default:
