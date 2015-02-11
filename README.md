@@ -47,11 +47,15 @@ later.  This means that it depends on GStreamer >1.2 and Vala >0.22.  See
 
 ### Run
 
-Start pulsevideo server:
+Start pulsevideo server (defaults on using v4l2src device=/dev/video0 in 720p30):
 
     pulsevideo
 
-Show webcam on screen:
+Start pulsevideo with a custom pipeline and custom caps:
+
+    pulsevideo --source-pipeline="videotestsrc is-live=true" --caps="video/x-raw, format=I420, width=320, height=240, framerate=25/1"
+
+Show stream on screen:
 
     gst-launch-1.0 dbusvideosourcesrc ! queue ! videoconvert ! xvimagesink
 
