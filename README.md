@@ -53,9 +53,7 @@ Start pulsevideo server:
 
 Show webcam on screen:
 
-    gst-launch-1.0 dbusvideosourcesrc \
-        ! videoparse width=1280 height=720 format=rgb ! queue ! videoconvert \
-        ! xvimagesink
+    gst-launch-1.0 dbusvideosourcesrc ! queue ! videoconvert ! xvimagesink
 
 Design
 ------
