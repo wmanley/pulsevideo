@@ -78,19 +78,19 @@ tests/socketintegrationtest : tests/socketintegrationtest.c build/gstnetcontrolm
 check: check-pytest check-gst check-gst-valgrind
 
 check-pytest : pulsevideo build/libgstpulsevideo.so
-	GST_PLUGIN_PATH=$(PWD)/build LD_LIBRARY_PATH=$(PWD)/build \
+	GST_PLUGIN_PATH=$(CURDIR)/build LD_LIBRARY_PATH=$(CURDIR)/build \
 	py.test --boxed -vv tests/
 
 check-gst: ./tests/socketintegrationtest
-	GST_PLUGIN_PATH=$(PWD)/build LD_LIBRARY_PATH=$(PWD)/build ./tests/socketintegrationtest
+	GST_PLUGIN_PATH=$(CURDIR)/build LD_LIBRARY_PATH=$(CURDIR)/build ./tests/socketintegrationtest
 
 check-gst-gdb: ./tests/socketintegrationtest
-	GST_PLUGIN_PATH=$(PWD)/build LD_LIBRARY_PATH=$(PWD)/build CK_FORK=no G_DEBUG=fatal_warnings gdb ./tests/socketintegrationtest
+	GST_PLUGIN_PATH=$(CURDIR)/build LD_LIBRARY_PATH=$(CURDIR)/build CK_FORK=no G_DEBUG=fatal_warnings gdb ./tests/socketintegrationtest
 
 check-gst-valgrind: ./tests/socketintegrationtest common/
-	GST_PLUGIN_PATH=$(PWD)/build \
+	GST_PLUGIN_PATH=$(CURDIR)/build \
 	G_SLICE=always-malloc \
-	LD_LIBRARY_PATH=$(PWD)/build \
+	LD_LIBRARY_PATH=$(CURDIR)/build \
 	G_DEBUG=fatal_warnings \
 	valgrind --tool=memcheck \
 	         --suppressions=./common/gst.supp \
