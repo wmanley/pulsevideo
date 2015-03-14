@@ -135,7 +135,7 @@ class FrameCounter(object):
 def test_with_dbus(pulsevideo_via_activation):
     os.environ['GST_DEBUG'] = "3,*videosource*:9"
     gst_launch = subprocess.Popen(
-        ['gst-launch-1.0', 'dbusvideosourcesrc',
+        ['gst-launch-1.0', 'pulsevideosrc',
          'bus-name=com.stbtester.VideoSource.test', '!', 'fdsink'],
         stdout=subprocess.PIPE)
     fc = FrameCounter(gst_launch.stdout)
@@ -155,11 +155,11 @@ def wait_until(f, timeout_secs=10):
             return val  # falsy
 
 
-def test_that_dbusvideosourcesrc_recovers_if_pulsevideo_crashes(
+def test_that_pulsevideosrc_recovers_if_pulsevideo_crashes(
         pulsevideo_via_activation):
     os.environ['GST_DEBUG'] = "3,*videosource*:9"
     gst_launch = subprocess.Popen(
-        ['gst-launch-1.0', '-e', '-q', 'dbusvideosourcesrc',
+        ['gst-launch-1.0', '-e', '-q', 'pulsevideosrc',
          'bus-name=com.stbtester.VideoSource.test', '!', 'fdsink'],
         stdout=subprocess.PIPE)
     fc = FrameCounter(gst_launch.stdout)
@@ -176,23 +176,23 @@ def test_that_dbusvideosourcesrc_recovers_if_pulsevideo_crashes(
     gst_launch.wait()
 
 
-def test_that_dbusvideosourcesrc_fails_if_pulsevideo_is_not_available(
+def test_that_pulsevideosrc_fails_if_pulsevideo_is_not_available(
         dbus_fixture):
     os.environ['GST_DEBUG'] = "3,*videosource*:9"
     gst_launch = subprocess.Popen(
-        ['gst-launch-1.0', 'dbusvideosourcesrc',
+        ['gst-launch-1.0', 'pulsevideosrc',
          'bus-name=com.stbtester.VideoSource.test', '!', 'fdsink'])
     assert wait_until(lambda: gst_launch.poll() is not None, 2)
     assert gst_launch.returncode != 0
 
 
-def test_that_dbusvideosourcesrc_gets_eos_if_pulsevideo_crashes_and_cant_be_activated(
+def test_that_pulsevideosrc_gets_eos_if_pulsevideo_crashes_and_cant_be_activated(
         pulsevideo):
     print time.time()
     os.environ['GST_DEBUG'] = "3,*videosource*:9"
     print time.time()
     gst_launch = subprocess.Popen(
-        ['gst-launch-1.0', '-q', 'dbusvideosourcesrc',
+        ['gst-launch-1.0', '-q', 'pulsevideosrc',
          'bus-name=com.stbtester.VideoSource.test', '!', 'fdsink'],
         stdout=subprocess.PIPE)
     fc = FrameCounter(gst_launch.stdout)

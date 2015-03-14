@@ -18,8 +18,8 @@
  */
 
 
-#ifndef __GST_DBUS_VIDEOSOURCE_SRC_H__
-#define __GST_DBUS_VIDEOSOURCE_SRC_H__
+#ifndef __GST_PULSEVIDEO_SRC_H__
+#define __GST_PULSEVIDEO_SRC_H__
 
 #include <gst/gst.h>
 #include <gst/gstbin.h>
@@ -28,21 +28,21 @@
 
 G_BEGIN_DECLS
 
-#define GST_TYPE_DBUS_VIDEOSOURCE_SRC \
-  (gst_dbus_videosource_src_get_type())
-#define GST_DBUS_VIDEOSOURCE_SRC(obj) \
-  (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_DBUS_VIDEOSOURCE_SRC,GstDBusVideoSourceSrc))
-#define GST_DBUS_VIDEOSOURCE_SRC_CLASS(klass) \
-  (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_DBUS_VIDEOSOURCE_SRC,GstDBusVideoSourceSrcClass))
-#define GST_IS_DBUS_VIDEOSOURCE_SRC(obj) \
-  (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_DBUS_VIDEOSOURCE_SRC))
-#define GST_IS_DBUS_VIDEOSOURCE_SRC_CLASS(klass) \
-  (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_DBUS_VIDEOSOURCE_SRC))
+#define GST_TYPE_PULSEVIDEO_SRC \
+  (gst_pulsevideo_src_get_type())
+#define GST_PULSEVIDEO_SRC(obj) \
+  (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_PULSEVIDEO_SRC,GstPulseVideoSrc))
+#define GST_PULSEVIDEO_SRC_CLASS(klass) \
+  (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_PULSEVIDEO_SRC,GstPulseVideoSrcClass))
+#define GST_IS_PULSEVIDEO_SRC(obj) \
+  (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_PULSEVIDEO_SRC))
+#define GST_IS_PULSEVIDEO_SRC_CLASS(klass) \
+  (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_PULSEVIDEO_SRC))
 
-typedef struct _GstDBusVideoSourceSrc GstDBusVideoSourceSrc;
-typedef struct _GstDBusVideoSourceSrcClass GstDBusVideoSourceSrcClass;
+typedef struct _GstPulseVideoSrc GstPulseVideoSrc;
+typedef struct _GstPulseVideoSrcClass GstPulseVideoSrcClass;
 
-struct _GstDBusVideoSourceSrc {
+struct _GstPulseVideoSrc {
   GstBin element;
 
   /*< private >*/
@@ -57,12 +57,12 @@ struct _GstDBusVideoSourceSrc {
   GDBusProxy *videosource;
 };
 
-struct _GstDBusVideoSourceSrcClass {
+struct _GstPulseVideoSrcClass {
   GstBinClass parent_class;
 };
 
-GType gst_dbus_videosource_src_get_type (void);
+GType gst_pulsevideo_src_get_type (void);
 
 G_END_DECLS
 
-#endif /* __GST_DBUS_VIDEOSOURCE_SRC_H__ */
+#endif /* __GST_PULSEVIDEO_SRC_H__ */

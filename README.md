@@ -57,7 +57,7 @@ Start pulsevideo with a custom pipeline and custom caps:
 
 Show stream on screen:
 
-    gst-launch-1.0 dbusvideosourcesrc ! queue ! videoconvert ! xvimagesink
+    gst-launch-1.0 pulsevideosrc ! queue ! videoconvert ! xvimagesink
 
 Design
 ------

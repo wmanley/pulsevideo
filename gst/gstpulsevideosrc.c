@@ -18,7 +18,7 @@
  */
 
 /**
- * SECTION:element-dbusvideosourcesrc
+ * SECTION:element-pulsevideosrc
  *
  * <refsect2>
  * <title>Example launch line</title>
@@ -26,19 +26,19 @@
  * # server:
  * pulsevideo videotestsrc
  * # client:
- * gst-launch-1.0 dbusvideosourcesrc ! autovideosink
+ * gst-launch-1.0 pulsevideosrc ! autovideosink
  * ]|
  * </refsect2>
  */
 
-#include "gstdbusvideosourcesrc.h"
+#include "gstpulsevideosrc.h"
 #include "gstvideosource1.h"
 #include <string.h>
 #include <gio/gunixfdlist.h>
 #include <gst/base/gstbasesrc.h>
 
-GST_DEBUG_CATEGORY_STATIC (dbusvideosourcesrc_debug);
-#define GST_CAT_DEFAULT dbusvideosourcesrc_debug
+GST_DEBUG_CATEGORY_STATIC (pulsevideosrc_debug);
+#define GST_CAT_DEFAULT pulsevideosrc_debug
 
 #define SWAP(x,y) do \
    { unsigned char swap_temp[sizeof(x) == sizeof(y) ? (signed)sizeof(x) : -1]; \
@@ -61,28 +61,28 @@ typedef enum {
   PV_INIT_NOOBJECT,
 } PvInitResult;
 
-#define gst_dbus_videosource_src_parent_class parent_class
-G_DEFINE_TYPE (GstDBusVideoSourceSrc, gst_dbus_videosource_src, GST_TYPE_BIN);
+#define gst_pulsevideo_src_parent_class parent_class
+G_DEFINE_TYPE (GstPulseVideoSrc, gst_pulsevideo_src, GST_TYPE_BIN);
 
 
-static void gst_dbus_videosource_src_finalize (GObject * gobject);
+static void gst_pulsevideo_src_finalize (GObject * gobject);
 
-static gboolean gst_dbus_videosource_src_stop (GstDBusVideoSourceSrc * bsrc);
-static gboolean gst_dbus_videosource_src_start (GstDBusVideoSourceSrc * bsrc);
+static gboolean gst_pulsevideo_src_stop (GstPulseVideoSrc * bsrc);
+static gboolean gst_pulsevideo_src_start (GstPulseVideoSrc * bsrc);
 
-static void gst_dbus_videosource_src_set_property (GObject * object, guint prop_id,
+static void gst_pulsevideo_src_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec);
-static void gst_dbus_videosource_src_get_property (GObject * object, guint prop_id,
+static void gst_pulsevideo_src_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec);
-static PvInitResult gst_dbus_videosource_src_reinit (
-    GstDBusVideoSourceSrc * src, GError **error);
+static PvInitResult gst_pulsevideo_src_reinit (
+    GstPulseVideoSrc * src, GError **error);
 
 static void on_socket_eos (GstElement *socketsrc, gpointer user_data);
-static GstStateChangeReturn gst_dbus_videosource_src_change_state (
+static GstStateChangeReturn gst_pulsevideo_src_change_state (
     GstElement * element, GstStateChange transition);
 
 static void
-gst_dbus_videosource_src_class_init (GstDBusVideoSourceSrcClass * klass)
+gst_pulsevideo_src_class_init (GstPulseVideoSrcClass * klass)
 {
   GObjectClass *gobject_class;
   GstElementClass *gstelement_class;
@@ -90,9 +90,9 @@ gst_dbus_videosource_src_class_init (GstDBusVideoSourceSrcClass * klass)
   gobject_class = (GObjectClass *) klass;
   gstelement_class = (GstElementClass *) klass;
 
-  gobject_class->set_property = gst_dbus_videosource_src_set_property;
-  gobject_class->get_property = gst_dbus_videosource_src_get_property;
-  gobject_class->finalize = gst_dbus_videosource_src_finalize;
+  gobject_class->set_property = gst_pulsevideo_src_set_property;
+  gobject_class->get_property = gst_pulsevideo_src_get_property;
+  gobject_class->finalize = gst_pulsevideo_src_finalize;
 
   g_object_class_install_property (gobject_class, PROP_DBUS_CONNECTION,
       g_param_spec_object ("dbus-connection", "DBus Connection",
@@ -110,24 +110,24 @@ gst_dbus_videosource_src_class_init (GstDBusVideoSourceSrcClass * klass)
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | G_PARAM_CONSTRUCT));
 
   gst_element_class_set_static_metadata (gstelement_class,
-      "DBus VideoSource source", "Source/DBus",
+      "PulseVideo source", "Source/DBus",
       "Receive data from an object on DBus that exposes the "
       "com.stbtester.VideoSource1 interface",
       "William Manley <will@williammanley.net>");
 
-  gstelement_class->change_state = gst_dbus_videosource_src_change_state;
-  GST_DEBUG_CATEGORY_INIT (dbusvideosourcesrc_debug, "dbusvideosourcesrc", 0,
-      "DBus VideoSource Source");
+  gstelement_class->change_state = gst_pulsevideo_src_change_state;
+  GST_DEBUG_CATEGORY_INIT (pulsevideosrc_debug, "pulsevideosrc", 0,
+      "PulseVideo Source");
 }
 
 static void
 on_socket_eos (GstElement *socketsrc, gpointer user_data)
 {
-  GstDBusVideoSourceSrc *src = (GstDBusVideoSourceSrc *) user_data;
+  GstPulseVideoSrc *src = (GstPulseVideoSrc *) user_data;
 
   GST_INFO_OBJECT (src, "VideoSource has gone away, retrying connection");
 
-  switch (gst_dbus_videosource_src_reinit (src, NULL)) {
+  switch (gst_pulsevideo_src_reinit (src, NULL)) {
   case PV_INIT_SUCCESS:
     GST_INFO_OBJECT (src, "Successfully reconnected");
     break;
@@ -141,7 +141,7 @@ on_socket_eos (GstElement *socketsrc, gpointer user_data)
 }
 
 static void
-gst_dbus_videosource_src_init (GstDBusVideoSourceSrc * this)
+gst_pulsevideo_src_init (GstPulseVideoSrc * this)
 {
   GstPad *pad;
 
@@ -165,9 +165,9 @@ gst_dbus_videosource_src_init (GstDBusVideoSourceSrc * this)
 }
 
 static void
-gst_dbus_videosource_src_finalize (GObject * gobject)
+gst_pulsevideo_src_finalize (GObject * gobject)
 {
-  GstDBusVideoSourceSrc *this = GST_DBUS_VIDEOSOURCE_SRC (gobject);
+  GstPulseVideoSrc *this = GST_PULSEVIDEO_SRC (gobject);
 
   g_free (this->bus_name);
   this->bus_name = NULL;
@@ -183,10 +183,10 @@ gst_dbus_videosource_src_finalize (GObject * gobject)
 }
 
 static void
-gst_dbus_videosource_src_set_property (GObject * object, guint prop_id,
+gst_pulsevideo_src_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec)
 {
-  GstDBusVideoSourceSrc *src = GST_DBUS_VIDEOSOURCE_SRC (object);
+  GstPulseVideoSrc *src = GST_PULSEVIDEO_SRC (object);
 
   switch (prop_id) {
     case PROP_DBUS_CONNECTION: {
@@ -227,26 +227,26 @@ gst_dbus_videosource_src_set_property (GObject * object, guint prop_id,
 }
 
 static void
-gst_dbus_videosource_src_get_property (GObject * object, guint prop_id,
+gst_pulsevideo_src_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec)
 {
-  GstDBusVideoSourceSrc *dbusvideosourcesrc = GST_DBUS_VIDEOSOURCE_SRC (object);
+  GstPulseVideoSrc *pulsevideosrc = GST_PULSEVIDEO_SRC (object);
 
   switch (prop_id) {
     case PROP_DBUS_CONNECTION:
-      GST_OBJECT_LOCK (dbusvideosourcesrc);
-      g_value_set_object (value, dbusvideosourcesrc->dbus);
-      GST_OBJECT_UNLOCK (dbusvideosourcesrc);
+      GST_OBJECT_LOCK (pulsevideosrc);
+      g_value_set_object (value, pulsevideosrc->dbus);
+      GST_OBJECT_UNLOCK (pulsevideosrc);
       break;
     case PROP_BUS_NAME:
-      GST_OBJECT_LOCK (dbusvideosourcesrc);
-      g_value_set_string (value, dbusvideosourcesrc->bus_name);
-      GST_OBJECT_UNLOCK (dbusvideosourcesrc);
+      GST_OBJECT_LOCK (pulsevideosrc);
+      g_value_set_string (value, pulsevideosrc->bus_name);
+      GST_OBJECT_UNLOCK (pulsevideosrc);
       break;
     case PROP_OBJECT_PATH: {
-      GST_OBJECT_LOCK (dbusvideosourcesrc);
-      g_value_set_string (value, dbusvideosourcesrc->object_path);
-      GST_OBJECT_UNLOCK (dbusvideosourcesrc);
+      GST_OBJECT_LOCK (pulsevideosrc);
+      g_value_set_string (value, pulsevideosrc->object_path);
+      GST_OBJECT_UNLOCK (pulsevideosrc);
       break;
     }
     default:
@@ -256,16 +256,16 @@ gst_dbus_videosource_src_get_property (GObject * object, guint prop_id,
 }
 
 static GstStateChangeReturn
-gst_dbus_videosource_src_change_state (GstElement * element,
+gst_pulsevideo_src_change_state (GstElement * element,
     GstStateChange transition)
 {
-  GstDBusVideoSourceSrc *src;
+  GstPulseVideoSrc *src;
   GstStateChangeReturn result;
 
-  src = GST_DBUS_VIDEOSOURCE_SRC (element);
+  src = GST_PULSEVIDEO_SRC (element);
 
   if (transition == GST_STATE_CHANGE_READY_TO_PAUSED) {
-    if (!gst_dbus_videosource_src_start ((GstDBusVideoSourceSrc*) element)) {
+    if (!gst_pulsevideo_src_start ((GstPulseVideoSrc*) element)) {
       result = GST_STATE_CHANGE_FAILURE;
       goto failure;
     }
@@ -277,7 +277,7 @@ gst_dbus_videosource_src_change_state (GstElement * element,
 
   if (transition == GST_STATE_CHANGE_PAUSED_TO_READY) {
     g_cancellable_cancel (src->cancellable);
-    gst_dbus_videosource_src_stop ((GstDBusVideoSourceSrc *)element);
+    gst_pulsevideo_src_stop ((GstPulseVideoSrc *)element);
   }
 
   return result;
@@ -291,7 +291,7 @@ failure:
 }
 
 static PvInitResult
-gst_dbus_videosource_src_reinit (GstDBusVideoSourceSrc * src, GError **error)
+gst_pulsevideo_src_reinit (GstPulseVideoSrc * src, GError **error)
 {
   GDBusConnection *dbus = NULL;
   gchar *bus_name = NULL;
@@ -382,12 +382,12 @@ done:
 
 /* create a socket for connecting to remote server */
 static gboolean
-gst_dbus_videosource_src_start (GstDBusVideoSourceSrc * src)
+gst_pulsevideo_src_start (GstPulseVideoSrc * src)
 {
   GError *error = NULL;
   gboolean ret = FALSE;
 
-  switch (gst_dbus_videosource_src_reinit (src, &error)) {
+  switch (gst_pulsevideo_src_reinit (src, &error)) {
   case PV_INIT_SUCCESS:
     ret = TRUE;
     break;
@@ -409,9 +409,9 @@ gst_dbus_videosource_src_start (GstDBusVideoSourceSrc * src)
 }
 
 static gboolean
-gst_dbus_videosource_src_stop (GstDBusVideoSourceSrc * bsrc)
+gst_pulsevideo_src_stop (GstPulseVideoSrc * bsrc)
 {
-  GstDBusVideoSourceSrc *src = GST_DBUS_VIDEOSOURCE_SRC (bsrc);
+  GstPulseVideoSrc *src = GST_PULSEVIDEO_SRC (bsrc);
 
   GDBusProxy *videosource = NULL;
 

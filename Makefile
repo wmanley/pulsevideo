@@ -174,8 +174,8 @@ build/%.h : gst/%.h Makefile | build/debugutils build/tcp build/tmpfile
 	      >$@
 
 build/libgstpulsevideo.so : \
-		build/gstdbusvideosourcesrc.h \
-		build/gstdbusvideosourcesrc.c \
+		build/gstpulsevideosrc.h \
+		build/gstpulsevideosrc.c \
 		build/gstnetcontrolmessagemeta.c \
 		build/gstnetcontrolmessagemeta.h \
 		build/gstpulsevideoplugin.c \
