@@ -5,6 +5,7 @@ gst/libgstpulsevideo.so
 gst/gstvideosource1.c
 gst/gstvideosource1.h
 pulsevideo
+TAGS
 tests/__pycache__
 tests/socketintegrationtest
 VERSION
