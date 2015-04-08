@@ -214,5 +214,8 @@ build/gstvideosource1.c build/gstvideosource1.h : \
 		--interface-prefix=com.stbtester. \
 		--c-namespace Gst ../$<
 
+TAGS:
+	git ls-files | xargs etags
+
 .PHONY: all clean check dist doc install uninstall
 .PHONY: FORCE TAGS
