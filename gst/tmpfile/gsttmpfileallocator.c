@@ -23,6 +23,8 @@
 #include <gst/allocators/gstdmabuf.h>
 
 #include <fcntl.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -35,6 +37,8 @@ typedef struct
 {
   GstAllocator parent;
   GstAllocator *dmabuf_allocator;
+  uint32_t frame_count;
+  uint32_t pid;
 } GstTmpFileAllocator;
 
 typedef struct
@@ -48,8 +52,14 @@ G_DEFINE_TYPE (GstTmpFileAllocator, gst_tmpfile_allocator, GST_TYPE_ALLOCATOR);
 static int
 tmpfile_create (GstTmpFileAllocator * allocator, gsize size)
 {
-  char filename[] = "/dev/shm/tmpfilepay.XXXXXX";
+  char filename[] = "/dev/shm/gsttmpfilepay.PPPPP.NNNNNNNNNN.XXXXXX";
   int fd, result;
+
+  /* This should not be strictly necessary, but it can be useful to know more
+     about where an fd came from when looking in /proc/<PID>/fd/ */
+  snprintf(filename, sizeof(filename),
+      "/dev/shm/gsttmpfilepay.%05d.%010d.XXXXXX",
+      allocator->pid, allocator->frame_count++);
 
   GST_DEBUG_OBJECT (allocator, "tmpfile_create");
 
@@ -76,6 +86,8 @@ static void
 gst_tmpfile_allocator_init (GstTmpFileAllocator * alloc)
 {
   alloc->dmabuf_allocator = gst_dmabuf_allocator_new ();
+  alloc->frame_count = 0;
+  alloc->pid = getpid();
 }
 
 static void
