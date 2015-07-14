@@ -65,6 +65,7 @@ enum
 {
   PROP_0,
   PROP_SOCKET,
+  PROP_CAPS,
 };
 
 enum
@@ -81,6 +82,7 @@ G_DEFINE_TYPE (GstSocketSrc, gst_socket_src, GST_TYPE_PUSH_SRC);
 
 static void gst_socket_src_finalize (GObject * gobject);
 
+static GstCaps *gst_socketsrc_getcaps (GstBaseSrc * src, GstCaps * filter);
 static GstFlowReturn gst_socket_src_fill (GstPushSrc * psrc,
     GstBuffer * outbuf);
 static gboolean gst_socket_src_unlock (GstBaseSrc * bsrc);
@@ -115,6 +117,11 @@ gst_socket_src_class_init (GstSocketSrcClass * klass)
           "The socket to receive packets from", G_TYPE_SOCKET,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
+  g_object_class_install_property (gobject_class, PROP_CAPS,
+      g_param_spec_boxed ("caps", "Caps",
+          "The caps of the source pad", GST_TYPE_CAPS,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
   gst_socket_src_signals[ON_SOCKET_EOS] =
     g_signal_new ("on-socket-eos", G_TYPE_FROM_CLASS (klass),
         G_SIGNAL_RUN_FIRST, G_STRUCT_OFFSET (GstSocketSrcClass, on_socket_eos),
@@ -129,6 +136,7 @@ gst_socket_src_class_init (GstSocketSrcClass * klass)
       "Thomas Vander Stichele <thomas at apestaart dot org>, "
       "William Manley <will@williammanley.net>");
 
+  gstbasesrc_class->get_caps = gst_socketsrc_getcaps;
   gstbasesrc_class->unlock = gst_socket_src_unlock;
   gstbasesrc_class->unlock_stop = gst_socket_src_unlock_stop;
 
@@ -149,6 +157,8 @@ gst_socket_src_finalize (GObject * gobject)
 {
   GstSocketSrc *this = GST_SOCKET_SRC (gobject);
 
+  if (this->caps)
+    gst_caps_unref (this->caps);
   if (this->cancellable)
     g_object_unref (this->cancellable);
   this->cancellable = NULL;
@@ -157,6 +167,32 @@ gst_socket_src_finalize (GObject * gobject)
   this->socket = NULL;
 
   G_OBJECT_CLASS (parent_class)->finalize (gobject);
+}
+
+static GstCaps *
+gst_socketsrc_getcaps (GstBaseSrc * src, GstCaps * filter)
+{
+  GstSocketSrc *socketsrc;
+  GstCaps *caps, *result;
+
+  socketsrc = GST_SOCKET_SRC (src);
+
+  GST_OBJECT_LOCK (src);
+  if ((caps = socketsrc->caps))
+    gst_caps_ref (caps);
+  GST_OBJECT_UNLOCK (src);
+
+  if (caps) {
+    if (filter) {
+      result = gst_caps_intersect_full (filter, caps, GST_CAPS_INTERSECT_FIRST);
+      gst_caps_unref (caps);
+    } else {
+      result = caps;
+    }
+  } else {
+    result = (filter) ? gst_caps_ref (filter) : gst_caps_new_any ();
+  }
+  return result;
 }
 
 static GstFlowReturn
@@ -287,6 +323,29 @@ gst_socket_src_set_property (GObject * object, guint prop_id,
       g_clear_object (&socket);
       break;
     }
+    case PROP_CAPS:
+    {
+      const GstCaps *new_caps_val = gst_value_get_caps (value);
+      GstCaps *new_caps;
+      GstCaps *old_caps;
+
+      if (new_caps_val == NULL) {
+        new_caps = gst_caps_new_any ();
+      } else {
+        new_caps = gst_caps_copy (new_caps_val);
+      }
+
+      GST_OBJECT_LOCK (socketsrc);
+      old_caps = socketsrc->caps;
+      socketsrc->caps = new_caps;
+      GST_OBJECT_UNLOCK (socketsrc);
+
+      if (old_caps)
+        gst_caps_unref (old_caps);
+
+      gst_pad_mark_reconfigure (GST_BASE_SRC_PAD (socketsrc));
+      break;
+    }
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -302,6 +361,11 @@ gst_socket_src_get_property (GObject * object, guint prop_id,
   switch (prop_id) {
     case PROP_SOCKET:
       g_value_set_object (value, socketsrc->socket);
+      break;
+    case PROP_CAPS:
+      GST_OBJECT_LOCK (socketsrc);
+      gst_value_set_caps (value, socketsrc->caps);
+      GST_OBJECT_UNLOCK (socketsrc);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
