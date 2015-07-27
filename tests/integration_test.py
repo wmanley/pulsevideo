@@ -112,12 +112,13 @@ def dbus_ctx(tmpdir):
 
 
 class FrameCounter(object):
-    def __init__(self, file_, frame_size=320 * 240 * 3):
+    def __init__(self, file_, frame_size=320 * 240 * 3, echo=False):
         self.file = file_
         self.count = 0
         self.frame_size = 320 * 240 * 3
         self.thread = threading.Thread(target=self._read_in_loop)
         self.thread.daemon = True
+        self.echo = echo
 
     def start(self):
         self.thread.start()
@@ -125,7 +126,10 @@ class FrameCounter(object):
     def _read_in_loop(self):
         bytes_read = 0
         while True:
-            new_bytes_read = len(self.file.read(self.frame_size))
+            new_data = self.file.read(self.frame_size)
+            if self.echo:
+                print new_data,
+            new_bytes_read = len(new_data)
             bytes_read += new_bytes_read
 
             # GIL makes this thread safe :)
@@ -201,3 +205,36 @@ def test_that_pulsevideosrc_gets_eos_if_pulsevideo_crashes_and_cant_be_activated
     pulsevideo.kill()
     assert wait_until(lambda: gst_launch.poll() is not None, 2)
     assert gst_launch.returncode == 0
+
+
+def test_that_pulsevideo_doesnt_leak_fds(pulsevideo):
+    gst_launch = subprocess.Popen(
+        ['gst-launch-1.0', '-q', 'pulsevideosrc',
+         'bus-name=com.stbtester.VideoSource.test', '!', 'fdsink'],
+        stdout=subprocess.PIPE)
+    count_fds = lambda: len(os.listdir('/proc/%i/fd/' % gst_launch.pid))
+    fc = FrameCounter(gst_launch.stdout)
+    fc.start()
+    assert wait_until(lambda: fc.count > 1)
+    fd_count_1 = count_fds()
+    assert wait_until(lambda: fc.count > 20)
+    fd_count_20 = count_fds()
+
+    assert (fd_count_20 - fd_count_1) < 5
+
+
+def test_that_we_can_tee_fddepay():
+    CAPS = 'video/x-raw,format=RGB,width=320,height=240,framerate=10/1'
+    gst_launch = subprocess.Popen(
+        ['gst-launch-1.0', '-q', 'videotestsrc', 'is-live=true', '!', CAPS,
+         '!', 'pvfdpay', '!', 'tee', 'name=t',
+         't.', '!', 'queue', '!', 'pvfddepay', '!', CAPS, '!', 'fdsink', 'fd=1',
+         't.', '!', 'queue', '!', 'pvfddepay', '!', CAPS, '!', 'fdsink', 'fd=2'],
+         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    fc1 = FrameCounter(gst_launch.stdout)
+    fc1.start()
+
+    fc2 = FrameCounter(gst_launch.stderr)
+    fc2.start()
+    assert wait_until(lambda: fc1.count > 1)
+    assert wait_until(lambda: fc2.count > 1)

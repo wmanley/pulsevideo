@@ -171,8 +171,7 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
   FDMessage msg;
   GstMemory *dmabufmem = NULL;
   GstNetControlMessageMeta * meta;
-  int *fds = NULL;
-  int fds_len = 0;
+  GUnixFDList *fds = NULL;
   int fd = -1;
 
   GST_DEBUG_OBJECT (fddepay, "transform_ip");
@@ -193,30 +192,30 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
 
   if (meta &&
       g_socket_control_message_get_msg_type (meta->message) == SCM_RIGHTS) {
-    fds = g_unix_fd_message_steal_fds ((GUnixFDMessage*) meta->message,
-        &fds_len);
+    fds = g_unix_fd_message_get_fd_list ((GUnixFDMessage*) meta->message);
     meta = NULL;
   }
 
-  if (fds == NULL || fds_len != 1) {
+  if (g_unix_fd_list_get_length (fds) != 1) {
     GST_WARNING_OBJECT (fddepay, "fddepay: Expect to receive 1 FD for each "
-        "buffer, received %i", fds_len);
+        "buffer, received %i", g_unix_fd_list_get_length (fds));
     goto error;
   }
-  fd = dup (fds[0]);
-  if (fd < 0) {
-    GST_WARNING_OBJECT (fddepay, "fddepay: Could not dup FD %i: %s", fds[0],
-        strerror (errno));
-    goto error;
-  }
-  fcntl (fd, F_SETFD, FD_CLOEXEC);
-  g_free (fds);
+
+  fd = g_unix_fd_list_get (fds, 0, NULL);
   fds = NULL;
+
+  if (fd == -1) {
+    GST_WARNING_OBJECT (fddepay, "fddepay: Could not get FD from buffer's "
+        "GUnixFDList");
+    goto error;
+  }
 
   /* FIXME: Use stat to find out the size of the file, to make sure that the
    * size we've been told is the true size for safety and security. */
   dmabufmem = gst_dmabuf_allocator_alloc (fddepay->dmabuf_allocator, fd,
       msg.offset + msg.size);
+  fd = -1;
   gst_memory_resize (dmabufmem, msg.offset, msg.size);
 
   gst_buffer_remove_all_memory (buf);
@@ -227,8 +226,6 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
 
   return GST_FLOW_OK;
 error:
-  if (fds)
-    g_free (fds);
   if (fd >= 0)
     close (fd);
   return GST_FLOW_ERROR;
