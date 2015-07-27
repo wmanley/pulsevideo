@@ -112,12 +112,13 @@ def dbus_ctx(tmpdir):
 
 
 class FrameCounter(object):
-    def __init__(self, file_, frame_size=320 * 240 * 3):
+    def __init__(self, file_, frame_size=320 * 240 * 3, echo=False):
         self.file = file_
         self.count = 0
         self.frame_size = 320 * 240 * 3
         self.thread = threading.Thread(target=self._read_in_loop)
         self.thread.daemon = True
+        self.echo = echo
 
     def start(self):
         self.thread.start()
@@ -125,7 +126,10 @@ class FrameCounter(object):
     def _read_in_loop(self):
         bytes_read = 0
         while True:
-            new_bytes_read = len(self.file.read(self.frame_size))
+            new_data = self.file.read(self.frame_size)
+            if self.echo:
+                print new_data,
+            new_bytes_read = len(new_data)
             bytes_read += new_bytes_read
 
             # GIL makes this thread safe :)
