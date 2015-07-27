@@ -212,15 +212,18 @@ def test_that_pulsevideo_doesnt_leak_fds(pulsevideo):
         ['gst-launch-1.0', '-q', 'pulsevideosrc',
          'bus-name=com.stbtester.VideoSource.test', '!', 'fdsink'],
         stdout=subprocess.PIPE)
-    count_fds = lambda: len(os.listdir('/proc/%i/fd/' % gst_launch.pid))
+    count_fds = lambda pid: len(os.listdir('/proc/%i/fd/' % pid))
     fc = FrameCounter(gst_launch.stdout)
     fc.start()
     assert wait_until(lambda: fc.count > 1)
-    fd_count_1 = count_fds()
+    client_fd_count_1 = count_fds(gst_launch.pid)
+    server_fd_count_1 = count_fds(pulsevideo.pid)
     assert wait_until(lambda: fc.count > 20)
-    fd_count_20 = count_fds()
+    client_fd_count_20 = count_fds(gst_launch.pid)
+    server_fd_count_20 = count_fds(pulsevideo.pid)
 
-    assert (fd_count_20 - fd_count_1) < 5
+    assert (client_fd_count_20 - client_fd_count_1) < 5
+    assert (server_fd_count_20 - server_fd_count_1) < 5
 
 
 def test_that_we_can_tee_fddepay():
