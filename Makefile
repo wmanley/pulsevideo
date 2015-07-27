@@ -77,9 +77,11 @@ tests/socketintegrationtest : tests/socketintegrationtest.c build/gstnetcontrolm
 
 check: check-pytest check-gst check-gst-valgrind
 
+TESTS=tests/
+
 check-pytest : pulsevideo build/libgstpulsevideo.so
 	GST_PLUGIN_PATH=$(CURDIR)/build LD_LIBRARY_PATH=$(CURDIR)/build \
-	py.test --boxed -vv tests/
+	py.test --boxed -vv $(TESTS)
 
 check-gst: ./tests/socketintegrationtest
 	GST_PLUGIN_PATH=$(CURDIR)/build LD_LIBRARY_PATH=$(CURDIR)/build ./tests/socketintegrationtest
