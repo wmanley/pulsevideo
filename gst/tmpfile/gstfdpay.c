@@ -72,13 +72,10 @@ static void gst_fdpay_dispose (GObject * object);
 
 static GstCaps *gst_fdpay_transform_caps (GstBaseTransform * trans,
     GstPadDirection direction, GstCaps * caps, GstCaps * filter);
-static gboolean gst_fdpay_transform_size (GstBaseTransform *trans,
-    GstPadDirection direction, GstCaps *caps, gsize size, GstCaps *othercaps,
-    gsize *othersize);
 static gboolean gst_fdpay_propose_allocation (GstBaseTransform * trans,
     GstQuery * decide_query, GstQuery * query);
-static GstFlowReturn gst_fdpay_transform (GstBaseTransform * trans,
-    GstBuffer * inbuf, GstBuffer * outbuf);
+static GstFlowReturn gst_fdpay_transform_ip (GstBaseTransform * trans,
+    GstBuffer * buf);
 
 /* pad templates */
 
@@ -127,10 +124,8 @@ gst_fdpay_class_init (GstFdpayClass * klass)
       GST_DEBUG_FUNCPTR (gst_fdpay_transform_caps);
   base_transform_class->propose_allocation =
       GST_DEBUG_FUNCPTR (gst_fdpay_propose_allocation);
-  base_transform_class->transform =
-      GST_DEBUG_FUNCPTR (gst_fdpay_transform);
-  base_transform_class->transform_size =
-      GST_DEBUG_FUNCPTR (gst_fdpay_transform_size);
+  base_transform_class->transform_ip =
+      GST_DEBUG_FUNCPTR (gst_fdpay_transform_ip);
 }
 
 static void
@@ -182,21 +177,6 @@ gst_fdpay_transform_caps (GstBaseTransform * trans, GstPadDirection direction,
   }
 }
 
-static gboolean
-gst_fdpay_transform_size (GstBaseTransform *trans, GstPadDirection direction,
-    GstCaps *caps, gsize size, GstCaps *othercaps, gsize *othersize)
-{
-  if (direction == GST_PAD_SRC) {
-    /* transform size going upstream - don't know how to do this */
-    return FALSE;
-  } else {
-    /* transform size going downstream */
-    *othersize = sizeof (FDMessage);
-  }
-
-  return TRUE;
-}
-
 /* propose allocation query parameters for input buffers */
 static gboolean
 gst_fdpay_propose_allocation (GstBaseTransform * trans,
@@ -235,11 +215,12 @@ gst_fdpay_get_dmabuf_memory (GstFdpay * tmpfilepay, GstBuffer * buffer)
 }
 
 static GstFlowReturn
-gst_fdpay_transform (GstBaseTransform * trans, GstBuffer * inbuf,
-    GstBuffer * outbuf)
+gst_fdpay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
 {
   GstFdpay *fdpay = GST_FDPAY (trans);
+  GstAllocator *downstream_allocator = NULL;
   GstMemory *dmabufmem = NULL;
+  GstMemory *msgmem;
   GstMapInfo info;
   GError *err = NULL;
   GSocketControlMessage *fdmsg = NULL;
@@ -247,7 +228,8 @@ gst_fdpay_transform (GstBaseTransform * trans, GstBuffer * inbuf,
 
   GST_DEBUG_OBJECT (fdpay, "transform_ip");
 
-  dmabufmem = gst_fdpay_get_dmabuf_memory (fdpay, inbuf);
+  dmabufmem = gst_fdpay_get_dmabuf_memory (fdpay, buf);
+  gst_buffer_remove_all_memory (buf);
 
   msg.size = dmabufmem->size;
   msg.offset = dmabufmem->offset;
@@ -260,12 +242,18 @@ gst_fdpay_transform (GstBaseTransform * trans, GstBuffer * inbuf,
   gst_memory_unref(dmabufmem);
   dmabufmem = NULL;
 
-  gst_buffer_add_net_control_message_meta (outbuf, fdmsg);
+  gst_buffer_add_net_control_message_meta (buf, fdmsg);
   g_clear_object (&fdmsg);
 
-  gst_buffer_map (outbuf, &info, GST_MAP_WRITE);
+  gst_base_transform_get_allocator (trans, &downstream_allocator, NULL);
+  msgmem = gst_allocator_alloc (downstream_allocator, sizeof (FDMessage), NULL);
+  gst_memory_map (msgmem, &info, GST_MAP_WRITE);
   memcpy (info.data, &msg, sizeof (msg));
-  gst_buffer_unmap (outbuf, &info);
+  gst_memory_unmap (msgmem, &info);
+  GST_UNREF (downstream_allocator);
+
+  gst_buffer_append_memory (buf, msgmem);
+  msgmem = NULL;
 
   return GST_FLOW_OK;
 append_fd_failed:

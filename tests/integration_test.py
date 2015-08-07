@@ -241,3 +241,30 @@ def test_that_we_can_tee_fddepay():
     fc2.start()
     assert wait_until(lambda: fc1.count > 1)
     assert wait_until(lambda: fc2.count > 1)
+
+
+def test_that_backing_memory_is_not_reused(pulsevideo):
+    """
+    This is a regression test.  There used to be a problem where only one
+    temporary file was created and sent and it was then reused by pulsevideo.
+    This had the effect that even after the client had received a video frame
+    the contents would change.
+    """
+    from gi.repository import Gst
+    Gst.init([])
+    pipeline = Gst.parse_launch(
+        'pulsevideosrc bus-name=com.stbtester.VideoSource.test '
+        '! appsink name=appsink')
+    appsink = pipeline.get_by_name('appsink')
+    pipeline.set_state(Gst.State.PLAYING)
+
+    buf = appsink.emit("pull-sample").get_buffer()
+    initial_data = buf.extract_dup(0, 10000000)
+
+    # Force a second buffer to have been populated but don't do anything with
+    # it:
+    appsink.emit("pull-sample")
+
+    after_next_data = buf.extract_dup(0, 10000000)
+    pipeline.set_state(Gst.State.NULL)
+    assert initial_data == after_next_data
