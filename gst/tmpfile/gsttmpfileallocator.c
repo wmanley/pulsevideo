@@ -37,8 +37,6 @@ typedef struct
 {
   GstAllocator parent;
   GstAllocator *dmabuf_allocator;
-  uint32_t frame_count;
-  uint32_t pid;
 } GstTmpFileAllocator;
 
 typedef struct
@@ -50,26 +48,37 @@ GType gst_tmpfile_allocator_get_type (void);
 G_DEFINE_TYPE (GstTmpFileAllocator, gst_tmpfile_allocator, GST_TYPE_ALLOCATOR);
 
 static int
+open_o_tmpfile_fallback(void)
+{
+  char filename[] = "/dev/shm/gsttmpfilepay.XXXXXX";
+  int fd = mkostemp (filename, O_CLOEXEC);
+  if (fd != -1)
+    unlink (filename);
+  return fd;
+}
+
+static int
 tmpfile_create (GstTmpFileAllocator * allocator, gsize size)
 {
-  char filename[] = "/dev/shm/gsttmpfilepay.PPPPP.NNNNNNNNNN.XXXXXX";
   int fd, result;
-
-  /* This should not be strictly necessary, but it can be useful to know more
-     about where an fd came from when looking in /proc/<PID>/fd/ */
-  snprintf(filename, sizeof(filename),
-      "/dev/shm/gsttmpfilepay.%05d.%010d.XXXXXX",
-      allocator->pid, allocator->frame_count++);
 
   GST_DEBUG_OBJECT (allocator, "tmpfile_create");
 
-  fd = mkostemp (filename, O_CLOEXEC);
+#ifdef O_TMPFILE
+  fd = open("/dev/shm", O_CLOEXEC | O_TMPFILE | O_RDWR, 0666);
+  if (fd == -1 && (errno == EOPNOTSUPP || errno == ENOENT || errno == EISDIR))
+#endif /* O_TMPFILE */
+  {
+    GST_DEBUG_OBJECT (allocator, "O_TMPFILE doesn't seem to be supported, "
+        "falling back to creat and unlink");
+    fd = open_o_tmpfile_fallback();
+  }
+
   if (fd == -1) {
     GST_WARNING_OBJECT (allocator, "Failed to create temporary file: %s",
         strerror (errno));
     return -1;
   }
-  unlink (filename);
 
   result = ftruncate (fd, size);
   if (result == -1) {
@@ -86,8 +95,6 @@ static void
 gst_tmpfile_allocator_init (GstTmpFileAllocator * alloc)
 {
   alloc->dmabuf_allocator = gst_dmabuf_allocator_new ();
-  alloc->frame_count = 0;
-  alloc->pid = getpid();
 }
 
 static void
