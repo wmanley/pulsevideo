@@ -46,6 +46,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 
@@ -173,6 +174,7 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
   GstNetControlMessageMeta * meta;
   GUnixFDList *fds = NULL;
   int fd = -1;
+  struct stat statbuf;
 
   GST_DEBUG_OBJECT (fddepay, "transform_ip");
 
@@ -211,8 +213,19 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
     goto error;
   }
 
-  /* FIXME: Use stat to find out the size of the file, to make sure that the
-   * size we've been told is the true size for safety and security. */
+  if (G_UNLIKELY (fstat (fd, &statbuf) != 0)) {
+    GST_WARNING_OBJECT (fddepay, "fddepay: Could not stat received fd %i: %s",
+        fd, strerror(errno));
+    goto error;
+  }
+  if (G_UNLIKELY (statbuf.st_size < msg.offset + msg.size)) {
+    /* Note: This is for sanity and debugging rather than security.  To be
+       secure we'd first need to check that it was a sealed memfd. */
+    GST_WARNING_OBJECT (fddepay, "fddepay: Received fd %i is too small to "
+        "contain data (%zu < %zu + %zu)", fd, statbuf.st_size, msg.offset,
+        msg.size);
+    goto error;
+  }
   dmabufmem = gst_dmabuf_allocator_alloc (fddepay->dmabuf_allocator, fd,
       msg.offset + msg.size);
   fd = -1;
