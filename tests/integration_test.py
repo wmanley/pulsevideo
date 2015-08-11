@@ -20,15 +20,19 @@ def tmpdir():
     finally:
         shutil.rmtree(dir_, ignore_errors=True)
 
+DEFAULT_SOURCE_PIPELINE = 'videotestsrc is-live=true'
 
-def pulsevideo_cmdline():
+
+def pulsevideo_cmdline(source_pipeline=None):
+    if source_pipeline is None:
+        source_pipeline = DEFAULT_SOURCE_PIPELINE
     return ['/usr/bin/env',
             'GST_PLUGIN_PATH=%s/../build' % os.path.dirname(__file__),
             'LD_LIBRARY_PATH=%s/../build/' % os.path.dirname(__file__),
             'G_DEBUG=fatal_warnings',
             '%s/../pulsevideo' % os.path.dirname(__file__),
             '--caps=video/x-raw,format=RGB,width=320,height=240,framerate=10/1',
-            '--source-pipeline=videotestsrc is-live=true',
+            '--source-pipeline=%s' % source_pipeline,
             '--bus-name-suffix=test']
 
 
@@ -50,10 +54,10 @@ def pulsevideo_via_activation(tmpdir):
         yield
 
 
-@pytest.yield_fixture(scope='function')
-def pulsevideo(tmpdir):
+@contextmanager
+def pulsevideo_ctx(tmpdir, source_pipeline=None):
     with dbus_ctx(tmpdir) as dbus_daemon:
-        pulsevideod = subprocess.Popen(pulsevideo_cmdline())
+        pulsevideod = subprocess.Popen(pulsevideo_cmdline(source_pipeline))
         sbus = dbus.SessionBus()
         bus = sbus.get_object('org.freedesktop.DBus', '/')
         assert dbus_daemon.poll() is None
@@ -62,6 +66,12 @@ def pulsevideo(tmpdir):
         yield pulsevideod
         pulsevideod.kill()
         pulsevideod.wait()
+
+
+@pytest.yield_fixture(scope='function')
+def pulsevideo(tmpdir):
+    with pulsevideo_ctx(tmpdir) as pulsevideod:
+        yield pulsevideod
 
 
 @pytest.yield_fixture(scope='function')
@@ -129,6 +139,7 @@ class FrameCounter(object):
             new_data = self.file.read(self.frame_size)
             if self.echo:
                 print new_data,
+
             new_bytes_read = len(new_data)
             bytes_read += new_bytes_read
 
@@ -268,3 +279,20 @@ def test_that_backing_memory_is_not_reused(pulsevideo):
     after_next_data = buf.extract_dup(0, 10000000)
     pipeline.set_state(Gst.State.NULL)
     assert initial_data == after_next_data
+
+
+def test_that_invalid_sized_buffers_are_dropped(tmpdir):
+    expected_buffer_size = 3 * 320 * 240
+
+    # Should mean that only half the buffers (~50) get through:
+    source_pipeline = (
+        'videotestsrc num-buffers=100 ! rndbuffersize min=%i max=%i'
+        % (expected_buffer_size - 1, expected_buffer_size + 1))
+    with pulsevideo_ctx(tmpdir, source_pipeline=source_pipeline):
+        os.environ['GST_DEBUG'] = '3'
+        output = subprocess.check_output(
+            ['gst-launch-1.0', '-q', 'pulsevideosrc',
+             'bus-name=com.stbtester.VideoSource.test', '!', 'checksumsink'])
+        buffers = [x.split() for x in output.strip().split('\n')]
+
+        assert 35 < len(buffers) < 65
