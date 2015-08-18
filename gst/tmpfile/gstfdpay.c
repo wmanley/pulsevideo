@@ -43,7 +43,7 @@
 #include "wire-protocol.h"
 
 #include <gst/gst.h>
-#include <gst/allocators/gstdmabuf.h>
+#include <gst/allocators/gstfdmemory.h>
 #include <gst/base/gstbasetransform.h>
 #include "gstfdpay.h"
 #include "gsttmpfileallocator.h"
@@ -192,13 +192,12 @@ gst_fdpay_propose_allocation (GstBaseTransform * trans,
 }
 
 static GstMemory *
-gst_fdpay_get_dmabuf_memory (GstFdpay * tmpfilepay, GstBuffer * buffer)
+gst_fdpay_get_fd_memory (GstFdpay * tmpfilepay, GstBuffer * buffer)
 {
   GstMemory *mem = NULL;
 
   if (gst_buffer_n_memory (buffer) == 1
-      && gst_memory_is_type (gst_buffer_peek_memory (buffer, 0),
-          GST_ALLOCATOR_DMABUF))
+      && gst_is_fd_memory (gst_buffer_peek_memory (buffer, 0)))
     mem = gst_buffer_get_memory (buffer, 0);
   else {
     GstMapInfo info;
@@ -219,7 +218,7 @@ gst_fdpay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
 {
   GstFdpay *fdpay = GST_FDPAY (trans);
   GstAllocator *downstream_allocator = NULL;
-  GstMemory *dmabufmem = NULL;
+  GstMemory *fdmem = NULL;
   GstMemory *msgmem;
   GstMapInfo info;
   GError *err = NULL;
@@ -228,19 +227,19 @@ gst_fdpay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
 
   GST_DEBUG_OBJECT (fdpay, "transform_ip");
 
-  dmabufmem = gst_fdpay_get_dmabuf_memory (fdpay, buf);
+  fdmem = gst_fdpay_get_fd_memory (fdpay, buf);
   gst_buffer_remove_all_memory (buf);
 
-  msg.size = dmabufmem->size;
-  msg.offset = dmabufmem->offset;
+  msg.size = fdmem->size;
+  msg.offset = fdmem->offset;
 
   fdmsg = g_unix_fd_message_new ();
   if (!g_unix_fd_message_append_fd ((GUnixFDMessage*) fdmsg,
-          gst_dmabuf_memory_get_fd (dmabufmem), &err)) {
+          gst_fd_memory_get_fd (fdmem), &err)) {
     goto append_fd_failed;
   }
-  gst_memory_unref(dmabufmem);
-  dmabufmem = NULL;
+  gst_memory_unref(fdmem);
+  fdmem = NULL;
 
   gst_buffer_add_net_control_message_meta (buf, fdmsg);
   g_clear_object (&fdmsg);
@@ -258,7 +257,7 @@ gst_fdpay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
   return GST_FLOW_OK;
 append_fd_failed:
   GST_WARNING_OBJECT (trans, "Appending fd failed: %s", err->message);
-  gst_memory_unref(dmabufmem);
+  gst_memory_unref(fdmem);
   g_clear_error (&err);
   g_clear_object (&fdmsg);
   return GST_FLOW_ERROR;
