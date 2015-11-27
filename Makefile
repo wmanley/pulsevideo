@@ -135,10 +135,10 @@ sq = $(subst ','\'',$(1)) # function to escape single quotes (')
 	    echo '$(flags)' > $@; \
 	fi
 
-build/tcp build/tmpfile build/debugutils :
+build/tcp build/tmpfile build/debugutils build/gst-plugins-base/gst-libs/gst/allocators :
 	mkdir -p $@
 
-build/%.c : gst/%.c Makefile | build/tcp build/tmpfile
+build/%.c : gst/%.c Makefile | build/tcp build/tmpfile build/gst-plugins-base/gst-libs/gst/allocators
 	sed -e 's/GstMulti/PvMulti/g' \
 	    -e 's/GST_MULTI/PV_MULTI/g' \
 	    -e 's/gst_multi/pv_multi/g' \
@@ -151,12 +151,22 @@ build/%.c : gst/%.c Makefile | build/tcp build/tmpfile
 	    -e 's/gst_watchdog/pv_watchdog/g' \
 	    -e 's/GST_WATCHDOG/PV_WATCHDOG/g' \
 	    -e 's/GST_TYPE_WATCHDOG/PV_TYPE_WATCHDOG/g' \
+	    -e 's/GstFdMemory/PvFdMemory/g' \
+	    -e 's/gstfdmemory/pvfdmemory/g' \
+	    -e 's/gst_fd_mem/pv_fd_mem/g' \
+	    -e 's/GST_FD_MEMORY/PV_FD_MEMORY/g' \
+	    -e 's/GstFdMemory/PvFdMemory/g' \
+	    -e 's/GstFdAllocator/PvFdAllocator/g' \
+	    -e 's/GST_FD_ALLOCATOR/PV_FD_ALLOCATOR/g' \
+	    -e 's/gst_fd_allocator/pv_fd_allocator/g' \
+	    -e 's/gst_is_fd_memory/pv_is_fd_memory/g' \
 	    $< \
 	| sed -e 's/include "pv/include "gst/g' \
 	      -e 's,include "tcp/pv,include "tcp/gst,g' \
 	      -e 's,include "tmpfile/pv,include "tmpfile/gst,g' \
+	      -e 's,include <gst/allocators/pv,include <gst-plugins-base/gst-libs/gst/allocators/gst,' \
 	      >$@
-build/%.h : gst/%.h Makefile | build/debugutils build/tcp build/tmpfile
+build/%.h : gst/%.h Makefile | build/debugutils build/tcp build/tmpfile build/gst-plugins-base/gst-libs/gst/allocators
 	sed -e 's/GstMulti/PvMulti/g' \
 	    -e 's/GST_MULTI/PV_MULTI/g' \
 	    -e 's/gst_multi/pv_multi/g' \
@@ -169,13 +179,26 @@ build/%.h : gst/%.h Makefile | build/debugutils build/tcp build/tmpfile
 	    -e 's/gst_watchdog/pv_watchdog/g' \
 	    -e 's/GST_WATCHDOG/PV_WATCHDOG/g' \
 	    -e 's/GST_TYPE_WATCHDOG/PV_TYPE_WATCHDOG/g' \
+	    -e 's/GstFdMemory/PvFdMemory/g' \
+	    -e 's/gstfdmemory/pvfdmemory/g' \
+	    -e 's/gst_fd_mem/pv_fd_mem/g' \
+	    -e 's/GST_FD_MEMORY/PV_FD_MEMORY/g' \
+	    -e 's/GstFdMemory/PvFdMemory/g' \
+	    -e 's/GstFdMemory/PvFdMemory/g' \
+	    -e 's/GstFdAllocator/PvFdAllocator/g' \
+	    -e 's/GST_FD_ALLOCATOR/PV_FD_ALLOCATOR/g' \
+	    -e 's/gst_fd_allocator/pv_fd_allocator/g' \
+	    -e 's/gst_is_fd_memory/pv_is_fd_memory/g' \
 	    $< \
 	| sed -e 's/include "pv/include "gst/g' \
 	      -e 's,include "tcp/pv,include "tcp/gst,g' \
 	      -e 's,include "tmpfile/pv,include "tmpfile/gst,g' \
+	      -e 's,include <gst/allocators/pv,include <gst-plugins-base/gst-libs/gst/allocators/gst,' \
 	      >$@
 
 build/libgstpulsevideo.so : \
+		build/gst-plugins-base/gst-libs/gst/allocators/gstfdmemory.h \
+		build/gst-plugins-base/gst-libs/gst/allocators/gstfdmemory.c \
 		build/gstpulsevideosrc.h \
 		build/gstpulsevideosrc.c \
 		build/gstnetcontrolmessagemeta.c \
@@ -204,8 +227,9 @@ build/libgstpulsevideo.so : \
 		VERSION
 	@if ! pkg-config --exists $(PKG_DEPS); then \
 		printf "Please install packages $(PKG_DEPS)"; exit 1; fi
-	gcc -shared -o $@ $(filter %.c %.o,$^) -fPIC  -Wall -Werror $(CFLAGS) \
-		$(LDFLAGS) $$(pkg-config --libs --cflags $(PKG_DEPS)) \
+	gcc -shared -o $@ $(filter %.c %.o,$^) -fPIC  -Wall -Werror \
+		-I build -DHAVE_MMAP=1 $(CFLAGS) $(LDFLAGS) \
+		$$(pkg-config --libs --cflags $(PKG_DEPS)) \
 		-DVERSION=\"$(VERSION)\" -DPACKAGE="\"pulsevideo\""
 
 build/gstvideosource1.c build/gstvideosource1.h : \

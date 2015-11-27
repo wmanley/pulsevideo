@@ -20,7 +20,7 @@
 #define _GNU_SOURCE
 
 #include "gsttmpfileallocator.h"
-#include <gst/allocators/gstdmabuf.h>
+#include <gst/allocators/gstfdmemory.h>
 
 #include <fcntl.h>
 #include <stdint.h>
@@ -36,7 +36,7 @@
 typedef struct
 {
   GstAllocator parent;
-  GstAllocator *dmabuf_allocator;
+  GstAllocator *fd_allocator;
   uint32_t frame_count;
   uint32_t pid;
 } GstTmpFileAllocator;
@@ -85,7 +85,7 @@ tmpfile_create (GstTmpFileAllocator * allocator, gsize size)
 static void
 gst_tmpfile_allocator_init (GstTmpFileAllocator * alloc)
 {
-  alloc->dmabuf_allocator = gst_dmabuf_allocator_new ();
+  alloc->fd_allocator = gst_fd_allocator_new ();
   alloc->frame_count = 0;
   alloc->pid = getpid();
 }
@@ -94,9 +94,9 @@ static void
 gst_tmpfile_allocator_dispose (GObject * obj)
 {
   GstTmpFileAllocator *alloc = (GstTmpFileAllocator *) obj;
-  if (alloc->dmabuf_allocator)
-    g_object_unref (alloc->dmabuf_allocator);
-  alloc->dmabuf_allocator = NULL;
+  if (alloc->fd_allocator)
+    g_object_unref (alloc->fd_allocator);
+  alloc->fd_allocator = NULL;
 }
 
 GstAllocator *
@@ -127,13 +127,14 @@ gst_tmpfile_allocator_alloc (GstAllocator * allocator, gsize size,
       pad (size + pad (params->prefix, params->align) + params->padding,
       PAGE_ALIGN);
 
-  if (alloc->dmabuf_allocator == NULL)
+  if (alloc->fd_allocator == NULL)
     return NULL;
 
   fd = tmpfile_create (alloc, maxsize);
   if (fd < 0)
     return NULL;
-  mem = gst_dmabuf_allocator_alloc (alloc->dmabuf_allocator, fd, maxsize);
+  mem = gst_fd_allocator_alloc (alloc->fd_allocator, fd, maxsize,
+      GST_FD_MEMORY_FLAG_NONE);
   gst_memory_resize (mem, pad (params->prefix, params->align), size);
   return mem;
 }
