@@ -71,7 +71,7 @@ tmpfile_create (GstTmpFileAllocator * allocator, gsize size)
   }
   unlink (filename);
 
-  result = ftruncate (fd, size);
+  result = fallocate (fd, 0, 0, size);
   if (result == -1) {
     GST_WARNING_OBJECT (allocator, "Failed to resize temporary file: %s",
         strerror (errno));
