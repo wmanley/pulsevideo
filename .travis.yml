@@ -1,5 +1,8 @@
 language: c
 
+sudo: required
+dist: trusty
+
 install:
  - sudo add-apt-repository -y ppa:gstreamer-developers/ppa
  - sudo apt-get update
