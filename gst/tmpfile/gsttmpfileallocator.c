@@ -31,6 +31,9 @@
 
 #define PAGE_ALIGN 4095
 
+GST_DEBUG_CATEGORY_STATIC (gst_tmpfileallocator_debug);
+#define GST_CAT_DEFAULT gst_tmpfileallocator_debug
+
 #define GST_TYPE_TMPFILE_ALLOCATOR    (gst_tmpfile_allocator_get_type ())
 
 typedef struct
@@ -60,8 +63,6 @@ tmpfile_create (GstTmpFileAllocator * allocator, gsize size)
   snprintf(filename, sizeof(filename),
       "/dev/shm/gsttmpfilepay.%05d.%010d.XXXXXX",
       allocator->pid, allocator->frame_count++);
-
-  GST_DEBUG_OBJECT (allocator, "tmpfile_create");
 
   fd = mkostemp (filename, O_CLOEXEC);
   if (fd == -1) {
@@ -123,6 +124,9 @@ gst_tmpfile_allocator_alloc (GstAllocator * allocator, gsize size,
 
   g_return_val_if_fail (params != NULL, NULL);
 
+  GST_DEBUG_OBJECT (allocator, "gst_tmpfile_allocator_alloc(%p, %"
+      G_GSIZE_FORMAT ")", allocator, size);
+
   maxsize =
       pad (size + pad (params->prefix, params->align) + params->padding,
       PAGE_ALIGN);
@@ -148,4 +152,7 @@ gst_tmpfile_allocator_class_init (GstTmpFileAllocatorClass * klass)
   gobject_class->dispose = gst_tmpfile_allocator_dispose;
 
   allocator_class->alloc = gst_tmpfile_allocator_alloc;
+
+  GST_DEBUG_CATEGORY_INIT (gst_tmpfileallocator_debug, "tmpfileallocator", 0,
+    "GstTmpFileAllocator");
 }
