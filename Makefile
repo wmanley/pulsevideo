@@ -103,6 +103,12 @@ check-gst-valgrind: ./tests/socketintegrationtest common/
 	         --num-callers=20 \
 	         ./tests/socketintegrationtest
 
+shell:
+	GST_PLUGIN_PATH=$(GST_PLUGIN_PATH):$(CURDIR)/build \
+	    LD_LIBRARY_PATH=$(CURDIR)/build:$(LD_LIBRARY_PATH) \
+	    PATH=$(CURDIR):$(PATH) \
+	    /bin/bash
+
 common/ :
 	git clone git://anongit.freedesktop.org/gstreamer/common common
 
