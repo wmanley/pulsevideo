@@ -248,9 +248,9 @@ setup_zerocopy_symmetry_test (SymmetryTest * st)
   GstElement *zerocopysink, *zerocopysrc, *socketsrc, *socketsink;
 
   zerocopysink = gst_parse_bin_from_description (
-      "fdpay ! pvmultisocketsink name=socketsink", TRUE, NULL);
+      "pvfdpay ! pvmultisocketsink name=socketsink", TRUE, NULL);
   zerocopysrc = gst_parse_bin_from_description (
-      "pvsocketsrc name=socketsrc ! fddepay", TRUE, NULL);
+      "pvsocketsrc name=socketsrc ! pvfddepay", TRUE, NULL);
 
   fail_unless (zerocopysink != NULL);
   fail_unless (zerocopysrc != NULL);
