@@ -77,6 +77,8 @@ symmetry_test_setup (SymmetryTest * st, GstElement * sink, GstElement * src)
 
   st->src_sink = GST_APP_SINK (gst_element_factory_make ("appsink", NULL));
   fail_unless (st->src_sink != NULL);
+  g_object_set (st->src_sink, "enable-last-sample", FALSE, NULL);
+
   gst_bin_add_many (GST_BIN (st->src_pipeline), st->src,
       GST_ELEMENT (st->src_sink), NULL);
   fail_unless (gst_element_link_many (st->src, GST_ELEMENT (st->src_sink),
@@ -159,6 +161,7 @@ setup_multisocketsink_and_socketsrc (SymmetryTest * st)
   GstElement *socketsink = NULL, *socketsrc = NULL;
 
   socketsink = gst_check_setup_element ("pvmultisocketsink");
+  g_object_set (socketsink, "enable-last-sample", FALSE, NULL);
   socketsrc = gst_check_setup_element ("pvsocketsrc");
 
   fail_unless (g_socketpair (G_SOCKET_FAMILY_UNIX,
@@ -248,9 +251,9 @@ setup_zerocopy_symmetry_test (SymmetryTest * st)
   GstElement *zerocopysink, *zerocopysrc, *socketsrc, *socketsink;
 
   zerocopysink = gst_parse_bin_from_description (
-      "fdpay ! pvmultisocketsink name=socketsink", TRUE, NULL);
+      "pvfdpay ! pvmultisocketsink name=socketsink", TRUE, NULL);
   zerocopysrc = gst_parse_bin_from_description (
-      "pvsocketsrc name=socketsrc ! fddepay", TRUE, NULL);
+      "pvsocketsrc name=socketsrc ! pvfddepay", TRUE, NULL);
 
   fail_unless (zerocopysink != NULL);
   fail_unless (zerocopysrc != NULL);
@@ -303,8 +306,17 @@ GST_START_TEST (test_that_zerocopy_doesnt_leak_fds)
 
   SymmetryTest st = { 0 };
   setup_zerocopy_symmetry_test (&st);
-  symmetry_test_assert_passthrough (&st,
-      gst_buffer_new_wrapped (g_strdup ("hello"), 5));
+
+  /* We're only interested if the number of fds used increases with time once
+     the pipeline is properly going.  Push a couple of buffers through to
+     allocate all those fds that will be reused for the lifetime of the
+     pipeline.  I have to run this twice becuase the first buffer and the last
+     two buffers are remembered.  I'm not quite sure why the first one is
+     remembered */
+  for (i = 0; i < 2; i++) {
+    symmetry_test_assert_passthrough (&st,
+        gst_buffer_new_wrapped (g_strdup ("hello"), 5));
+  }
 
   fd_count = count_fds();
   for (i = 0; i < 1000; i++) {
