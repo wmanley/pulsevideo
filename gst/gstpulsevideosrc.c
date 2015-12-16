@@ -82,9 +82,6 @@ static void on_socket_eos (GstElement *socketsrc, gpointer user_data);
 static GstStateChangeReturn gst_pulsevideo_src_change_state (
     GstElement * element, GstStateChange transition);
 
-static gulong
-gst_pad_add_invalid_buffer_dropper_probe (GstPad * pad);
-
 static void
 gst_pulsevideo_src_class_init (GstPulseVideoSrcClass * klass)
 {
@@ -148,6 +145,7 @@ static void
 gst_pulsevideo_src_init (GstPulseVideoSrc * this)
 {
   GstPad *internal_pad, *external_pad;
+  GstElement *rawvideovalidate = NULL;
 
   this->cancellable = g_cancellable_new ();
   this->socketsrc = gst_element_factory_make ("pvsocketsrc", NULL);
@@ -157,12 +155,14 @@ gst_pulsevideo_src_init (GstPulseVideoSrc * this)
   gst_bin_add (GST_BIN (this), gst_object_ref (this->fddepay));
   this->capsfilter = gst_element_factory_make ("capsfilter", NULL);
   gst_bin_add (GST_BIN (this), gst_object_ref (this->capsfilter));
+  rawvideovalidate = gst_element_factory_make ("rawvideovalidate", NULL);
+  gst_bin_add (GST_BIN (this), rawvideovalidate);
   gst_element_link_many (
-        this->socketsrc, this->fddepay, this->capsfilter, NULL);
+        this->socketsrc, this->fddepay, this->capsfilter, rawvideovalidate,
+        NULL);
 
-  internal_pad = gst_element_get_static_pad (this->capsfilter, "src");
+  internal_pad = gst_element_get_static_pad (rawvideovalidate, "src");
   external_pad = gst_ghost_pad_new ("src", internal_pad);
-  gst_pad_add_invalid_buffer_dropper_probe (external_pad);
   gst_element_add_pad (GST_ELEMENT (this), external_pad);
   gst_object_unref (internal_pad);
 
@@ -294,75 +294,6 @@ failure:
     GST_DEBUG_OBJECT (src, "parent failed state change");
     return result;
   }
-}
-
-typedef struct InvalidBufferDropper_t
-{
-  GstCaps * caps;
-  GstVideoInfo video_info;
-} InvalidBufferDropper;
-
-static void
-invalid_buffer_dropper_destroy (gpointer user_data)
-{
-  InvalidBufferDropper * dropper = (InvalidBufferDropper *) user_data;
-  if (dropper->caps)
-    gst_caps_unref (dropper->caps);
-  dropper->caps = 0;
-  g_slice_free (InvalidBufferDropper, dropper);
-}
-
-static GstPadProbeReturn
-invalid_buffer_dropper_callback (GstPad *pad, GstPadProbeInfo *info,
-    gpointer user_data)
-{
-  InvalidBufferDropper * dropper = (InvalidBufferDropper *) user_data;
-
-  if (info->type & GST_PAD_PROBE_TYPE_BUFFER) {
-    GstBuffer *buf = GST_PAD_PROBE_INFO_BUFFER (info);
-    gsize buffer_size = gst_buffer_get_size(buf);
-
-    if (G_UNLIKELY (dropper->video_info.size
-        && buffer_size != dropper->video_info.size))
-    {
-      /* Sometimes I've seen v4l2src produce buffers that are smaller than you
-         would expect based on the caps.  I don't think it's technically an
-         error, but it can certainly surprise downstream elements. */
-      GST_WARNING ("InvalidBufferDropper: Received buffer isn't "
-          "the right size we'd expect based caps \"%" GST_PTR_FORMAT "\" "
-          "(%zu != %zu).  Dropping this buffer", dropper->caps, buffer_size,
-          dropper->video_info.size);
-      return GST_PAD_PROBE_DROP;
-    }
-  }
-  else if (info->type & GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM) {
-    GstEvent *event = GST_PAD_PROBE_INFO_EVENT (info);
-
-    if (GST_EVENT_TYPE(event) == GST_EVENT_CAPS) {
-      GstCaps * caps = NULL;
-
-      gst_event_parse_caps (event, &caps);
-      gst_caps_replace (&dropper->caps, gst_caps_ref (caps));
-      if (!gst_video_info_from_caps (&dropper->video_info, caps))
-        memset (&dropper->video_info, 0, sizeof (dropper->video_info));
-      if (dropper->video_info.size == 0)
-        GST_DEBUG ("Output caps %" GST_PTR_FORMAT " has unknown size", caps);
-
-      GST_DEBUG ("InvalidBufferDropper: Seen caps \"%" GST_PTR_FORMAT "\" "
-          "Expecting buffer size %zu", dropper->caps, dropper->video_info.size);
-
-    }
-  }
-  return GST_PAD_PROBE_OK;
-}
-
-static gulong
-gst_pad_add_invalid_buffer_dropper_probe (GstPad * pad)
-{
-  InvalidBufferDropper * dropper = g_slice_new0 (InvalidBufferDropper);
-
-  return gst_pad_add_probe (pad, GST_PAD_PROBE_TYPE_DATA_DOWNSTREAM,
-      invalid_buffer_dropper_callback, dropper, invalid_buffer_dropper_destroy);
 }
 
 static PvInitResult
