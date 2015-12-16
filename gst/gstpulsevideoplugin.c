@@ -23,6 +23,7 @@
 
 #include "gstsocketsrc.h"
 #include "gstpulsevideosrc.h"
+#include "gstrawvideovalidate.h"
 #include "debugutils/gstwatchdog.h"
 #include "tcp/gstmultisocketsink.h"
 #include "tmpfile/gstfddepay.h"
@@ -43,7 +44,10 @@ plugin_init (GstPlugin * plugin)
     gst_element_register (plugin, "pvfddepay", GST_RANK_NONE,
           GST_TYPE_FDDEPAY) &&
     gst_element_register (plugin, "pvwatchdog", GST_RANK_NONE,
-          GST_TYPE_WATCHDOG);
+          GST_TYPE_WATCHDOG) &&
+    gst_element_register (plugin, "rawvideovalidate", GST_RANK_NONE,
+          GST_TYPE_RAW_VIDEO_VALIDATE);
+
 }
 
 GST_PLUGIN_DEFINE (GST_VERSION_MAJOR,

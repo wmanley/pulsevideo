@@ -214,6 +214,8 @@ build/libgstpulsevideo.so : \
 		build/gstpulsevideoplugin.c \
 		build/gstsocketsrc.h \
 		build/gstsocketsrc.c \
+		build/gstrawvideovalidate.h \
+		build/gstrawvideovalidate.c \
 		build/gstvideosource1.c \
 		build/gstvideosource1.h \
 		build/debugutils/gstwatchdog.h \
