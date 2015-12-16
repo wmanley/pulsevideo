@@ -145,6 +145,7 @@ build/tcp build/tmpfile build/debugutils build/gst-plugins-base/gst-libs/gst/all
 	mkdir -p $@
 
 build/%.c : gst/%.c Makefile | build/tcp build/tmpfile build/gst-plugins-base/gst-libs/gst/allocators
+	@echo GEN $@ && \
 	sed -e 's/GstMulti/PvMulti/g' \
 	    -e 's/GST_MULTI/PV_MULTI/g' \
 	    -e 's/gst_multi/pv_multi/g' \
@@ -173,6 +174,7 @@ build/%.c : gst/%.c Makefile | build/tcp build/tmpfile build/gst-plugins-base/gs
 	      -e 's,include <gst/allocators/pv,include <gst-plugins-base/gst-libs/gst/allocators/gst,' \
 	      >$@
 build/%.h : gst/%.h Makefile | build/debugutils build/tcp build/tmpfile build/gst-plugins-base/gst-libs/gst/allocators
+	@echo GEN $@ && \
 	sed -e 's/GstMulti/PvMulti/g' \
 	    -e 's/GST_MULTI/PV_MULTI/g' \
 	    -e 's/gst_multi/pv_multi/g' \
