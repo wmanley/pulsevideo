@@ -146,6 +146,7 @@ build/tcp build/tmpfile build/debugutils build/gst-plugins-base/gst-libs/gst/all
 
 build/%.c : gst/%.c Makefile | build/tcp build/tmpfile build/gst-plugins-base/gst-libs/gst/allocators
 	@echo GEN $@ && \
+	mkdir -p $$(dirname $@) && \
 	sed -e 's/GstMulti/PvMulti/g' \
 	    -e 's/GST_MULTI/PV_MULTI/g' \
 	    -e 's/gst_multi/pv_multi/g' \
@@ -167,6 +168,10 @@ build/%.c : gst/%.c Makefile | build/tcp build/tmpfile build/gst-plugins-base/gs
 	    -e 's/GST_FD_ALLOCATOR/PV_FD_ALLOCATOR/g' \
 	    -e 's/gst_fd_allocator/pv_fd_allocator/g' \
 	    -e 's/gst_is_fd_memory/pv_is_fd_memory/g' \
+	    -e 's/GstProgressReport/PvProgressReport/g' \
+	    -e 's/GST_TYPE_PROGRESS_REPORT/PV_TYPE_PROGRESS_REPORT/g' \
+	    -e 's/gst_progress_report/pv_progress_report/g' \
+	    -e 's/GST_PROGRESS_REPORT/PV_PROGRESS_REPORT/g' \
 	    $< \
 	| sed -e 's/include "pv/include "gst/g' \
 	      -e 's,include "tcp/pv,include "tcp/gst,g' \
@@ -197,6 +202,10 @@ build/%.h : gst/%.h Makefile | build/debugutils build/tcp build/tmpfile build/gs
 	    -e 's/GST_FD_ALLOCATOR/PV_FD_ALLOCATOR/g' \
 	    -e 's/gst_fd_allocator/pv_fd_allocator/g' \
 	    -e 's/gst_is_fd_memory/pv_is_fd_memory/g' \
+	    -e 's/GstProgressReport/PvProgressReport/g' \
+	    -e 's/GST_TYPE_PROGRESS_REPORT/PV_TYPE_PROGRESS_REPORT/g' \
+	    -e 's/gst_progress_report/pv_progress_report/g' \
+	    -e 's/GST_PROGRESS_REPORT/PV_PROGRESS_REPORT/g' \
 	    $< \
 	| sed -e 's/include "pv/include "gst/g' \
 	      -e 's,include "tcp/pv,include "tcp/gst,g' \
@@ -207,6 +216,8 @@ build/%.h : gst/%.h Makefile | build/debugutils build/tcp build/tmpfile build/gs
 build/libgstpulsevideo.so : \
 		build/gst-plugins-base/gst-libs/gst/allocators/gstfdmemory.h \
 		build/gst-plugins-base/gst-libs/gst/allocators/gstfdmemory.c \
+		build/gst-plugins-good/gst/debugutils/progressreport.c \
+		build/gst-plugins-good/gst/debugutils/progressreport.h \
 		build/gstpulsevideosrc.h \
 		build/gstpulsevideosrc.c \
 		build/gstnetcontrolmessagemeta.c \

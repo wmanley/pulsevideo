@@ -21,6 +21,7 @@
 #include "config.h"
 #endif
 
+#include "gst-plugins-good/gst/debugutils/progressreport.h"
 #include "gstsocketsrc.h"
 #include "gstpulsevideosrc.h"
 #include "gstrawvideovalidate.h"
@@ -33,6 +34,8 @@ static gboolean
 plugin_init (GstPlugin * plugin)
 {
   return
+    gst_element_register (plugin, "pvprogressreport", GST_RANK_NONE,
+          GST_TYPE_PROGRESS_REPORT) &&
     gst_element_register (plugin, "pvsocketsrc", GST_RANK_NONE,
           GST_TYPE_SOCKET_SRC) &&
     gst_element_register (plugin, "pulsevideosrc", GST_RANK_NONE,
