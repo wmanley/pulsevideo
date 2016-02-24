@@ -31,6 +31,7 @@
  * </refsect2>
  */
 
+#include "glib_compat.h"
 #include "gstpulsevideosink.h"
 #include <string.h>
 #include <gio/gunixfdlist.h>
