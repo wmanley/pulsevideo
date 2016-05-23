@@ -1,5 +1,5 @@
 /* GStreamer
- * Copyright (C) 2014 William Manley <will@williammanley.net>
+ * Copyright (C) 2014-2016 William Manley <will@williammanley.net>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -56,6 +56,8 @@ GST_DEBUG_CATEGORY_STATIC (gst_fddepay_debug_category);
 /* prototypes */
 
 
+static gboolean gst_fddepay_set_clock (GstElement * element,
+    GstClock * clock);
 static GstCaps *gst_fddepay_transform_caps (GstBaseTransform * trans,
     GstPadDirection direction, GstCaps * caps, GstCaps * filter);
 static void gst_fddepay_dispose (GObject * object);
@@ -90,22 +92,24 @@ static void
 gst_fddepay_class_init (GstFddepayClass * klass)
 {
   GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
+  GstElementClass *gstelement_class = GST_ELEMENT_CLASS (klass);
   GstBaseTransformClass *base_transform_class =
       GST_BASE_TRANSFORM_CLASS (klass);
 
   /* Setting up pads and setting metadata should be moved to
      base_class_init if you intend to subclass this class. */
-  gst_element_class_add_pad_template (GST_ELEMENT_CLASS (klass),
+  gst_element_class_add_pad_template (gstelement_class,
       gst_static_pad_template_get (&gst_fddepay_src_template));
-  gst_element_class_add_pad_template (GST_ELEMENT_CLASS (klass),
+  gst_element_class_add_pad_template (gstelement_class,
       gst_static_pad_template_get (&gst_fddepay_sink_template));
 
-  gst_element_class_set_static_metadata (GST_ELEMENT_CLASS (klass),
+  gst_element_class_set_static_metadata (gstelement_class,
       "Simple FD Deplayloder", "Generic",
       "Simple File-descriptor Depayloader for zero-copy video IPC",
       "William Manley <will@williammanley.net>");
 
   gobject_class->dispose = gst_fddepay_dispose;
+  gstelement_class->set_clock = gst_fddepay_set_clock;
   base_transform_class->transform_caps =
       GST_DEBUG_FUNCPTR (gst_fddepay_transform_caps);
   base_transform_class->transform_ip =
@@ -117,6 +121,8 @@ static void
 gst_fddepay_init (GstFddepay * fddepay)
 {
   fddepay->fd_allocator = gst_fd_allocator_new ();
+  fddepay->monotonic_clock = g_object_new (GST_TYPE_SYSTEM_CLOCK,
+      "clock-type", GST_CLOCK_TYPE_MONOTONIC, NULL);
 }
 
 void
@@ -131,6 +137,7 @@ gst_fddepay_dispose (GObject * object)
     g_object_unref (G_OBJECT (fddepay->fd_allocator));
     fddepay->fd_allocator = NULL;
   }
+  g_clear_object (&fddepay->monotonic_clock);
 
   G_OBJECT_CLASS (gst_fddepay_parent_class)->dispose (object);
 }
@@ -165,6 +172,16 @@ gst_fddepay_transform_caps (GstBaseTransform * trans, GstPadDirection direction,
   }
 }
 
+static gboolean
+gst_fddepay_set_clock (GstElement * element, GstClock * clock)
+{
+  GstFddepay *fddepay = GST_FDDEPAY (element);
+
+  gst_clock_set_master (fddepay->monotonic_clock, clock);
+
+  return TRUE;
+}
+
 static GstFlowReturn
 gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
 {
@@ -175,6 +192,7 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
   GUnixFDList *fds = NULL;
   int fd = -1;
   struct stat statbuf;
+  GstClockTime pipeline_clock_time, running_time;
 
   GST_DEBUG_OBJECT (fddepay, "transform_ip");
 
@@ -237,6 +255,19 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
   gst_buffer_append_memory (buf, fdmem);
   fdmem = NULL;
 
+  if (trans->segment.format == GST_FORMAT_TIME) {
+    GST_OBJECT_LOCK (fddepay->monotonic_clock);
+    pipeline_clock_time = gst_clock_adjust_unlocked (fddepay->monotonic_clock,
+        msg.capture_timestamp);
+    GST_OBJECT_UNLOCK (fddepay->monotonic_clock);
+    if (GST_ELEMENT (trans)->base_time < pipeline_clock_time) {
+      running_time = pipeline_clock_time - GST_ELEMENT (trans)->base_time;
+    } else {
+      running_time = 0;
+    }
+    GST_BUFFER_PTS (buf) = gst_segment_to_position (
+        &trans->segment, GST_FORMAT_TIME, running_time);
+  }
   return GST_FLOW_OK;
 error:
   if (fd >= 0)
