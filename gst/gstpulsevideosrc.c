@@ -113,7 +113,7 @@ gst_pulsevideo_src_class_init (GstPulseVideoSrcClass * klass)
   gst_element_class_set_static_metadata (gstelement_class,
       "PulseVideo source", "Source/DBus",
       "Receive data from an object on DBus that exposes the "
-      "com.stbtester.VideoSource1 interface",
+      "com.stbtester.VideoSource2 interface",
       "William Manley <will@williammanley.net>");
 
   gstelement_class->change_state = gst_pulsevideo_src_change_state;
@@ -304,7 +304,7 @@ gst_pulsevideo_src_reinit (GstPulseVideoSrc * src, GError **error)
   gchar *object_path = NULL;
   GError *err = NULL;
 
-  GstVideoSource1 *videosource = NULL;
+  GstVideoSource2 *videosource = NULL;
   gboolean ret = PV_INIT_FAILURE;
   const gchar *scaps = NULL;
   GstCaps *caps = NULL;
@@ -328,7 +328,7 @@ gst_pulsevideo_src_reinit (GstPulseVideoSrc * src, GError **error)
     }
   }
 
-  videosource = gst_video_source1_proxy_new_sync (dbus,
+  videosource = gst_video_source2_proxy_new_sync (dbus,
       G_DBUS_PROXY_FLAGS_NONE, bus_name, object_path, src->cancellable, &err);
   if (!videosource) {
     GST_ELEMENT_ERROR (src, RESOURCE, NOT_FOUND, (NULL),
@@ -336,7 +336,7 @@ gst_pulsevideo_src_reinit (GstPulseVideoSrc * src, GError **error)
     goto done;
   }
 
-  scaps = gst_video_source1_get_caps (videosource);
+  scaps = gst_video_source2_get_caps (videosource);
   if (!scaps) {
     ret = PV_INIT_NOOBJECT;
     g_set_error(&err, g_quark_from_static_string ("pv-read-caps-error-quark"),
@@ -352,7 +352,7 @@ gst_pulsevideo_src_reinit (GstPulseVideoSrc * src, GError **error)
   gst_caps_unref (caps);
   caps = NULL;
 
-  if (!gst_video_source1_call_attach_sync (videosource, NULL, NULL, &fdlist,
+  if (!gst_video_source2_call_attach_sync (videosource, NULL, NULL, &fdlist,
           src->cancellable, &err)) {
     ret = PV_INIT_NOOBJECT;
     goto done;

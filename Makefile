@@ -243,7 +243,7 @@ build/libgstpulsevideo.so : \
 		-DVERSION=\"$(VERSION)\" -DPACKAGE="\"pulsevideo\""
 
 build/gstvideosource1.c build/gstvideosource1.h : \
-		dbus-xml/com.stbtester.VideoSource1.xml
+		dbus-xml/com.stbtester.VideoSource2.xml
 	cd $(dir $@) && \
 	gdbus-codegen \
 		--generate-c-code $(basename $(notdir $@)) \
