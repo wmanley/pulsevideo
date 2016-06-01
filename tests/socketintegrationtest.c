@@ -1,6 +1,6 @@
 /* GStreamer
  *
- * Copyright (C) 2014 William Manley <will@williammanley.net>
+ * Copyright (C) 2014-2016 William Manley <will@williammanley.net>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -66,6 +66,9 @@ symmetry_test_setup (SymmetryTest * st, GstElement * sink, GstElement * src)
 
   st->sink_src = GST_APP_SRC (gst_element_factory_make ("appsrc", NULL));
   fail_unless (st->sink_src != NULL);
+
+  g_object_set (st->sink_src, "format", GST_FORMAT_TIME, NULL);
+
   caps = gst_caps_from_string ("application/x-gst-check");
   gst_app_src_set_caps (st->sink_src, caps);
   gst_caps_unref (caps);
@@ -253,7 +256,7 @@ setup_zerocopy_symmetry_test (SymmetryTest * st)
   zerocopysink = gst_parse_bin_from_description (
       "pvfdpay ! pvmultisocketsink name=socketsink", TRUE, NULL);
   zerocopysrc = gst_parse_bin_from_description (
-      "pvsocketsrc name=socketsrc ! pvfddepay", TRUE, NULL);
+      "pvsocketsrc name=socketsrc do-timestamp=true ! pvfddepay", TRUE, NULL);
 
   fail_unless (zerocopysink != NULL);
   fail_unless (zerocopysrc != NULL);
@@ -396,6 +399,91 @@ GST_START_TEST (test_that_we_can_provide_new_socketsrc_sockets_during_signal)
 GST_END_TEST
 
 
+static GstSample*
+send_buffer_through_pipeline (GstPipeline * pipeline, GstBuffer * buffer)
+{
+  GstAppSink * appsink = NULL;
+  GstAppSrc * appsrc = NULL;
+  GstSample * sample = NULL;
+
+  appsrc = GST_APP_SRC (gst_bin_get_by_name (GST_BIN (pipeline), "src"));
+  fail_unless (appsrc != NULL);
+  appsink = GST_APP_SINK (gst_bin_get_by_name (GST_BIN (pipeline), "sink"));
+  fail_unless (appsink != NULL);
+
+  gst_element_set_state (GST_ELEMENT (pipeline), GST_STATE_PLAYING);
+
+  gst_app_src_push_buffer (appsrc, buffer);
+  gst_app_src_end_of_stream (appsrc);
+
+  fail_unless ((sample = gst_app_sink_pull_sample (appsink)) != NULL);
+
+  fail_unless (gst_app_sink_pull_sample (appsink) == NULL);
+  fail_unless (gst_app_sink_is_eos (appsink));
+
+  gst_element_set_state (GST_ELEMENT (pipeline), GST_STATE_NULL);
+  g_clear_object (&appsrc);
+  g_clear_object (&appsink);
+
+  return sample;
+}
+
+static void
+check_monotonic_timestamp_with_clock(GstClock * clock)
+{
+  GstPipeline * pipeline = NULL;
+  GstSample * sample = NULL;
+  guint64 header[3];
+  guint64 before, after;
+  struct timespec ts;
+
+  /* Test setup: send a simple buffer through fdpay */
+  pipeline = GST_PIPELINE (gst_parse_launch (
+      "appsrc name=src format=GST_FORMAT_TIME is-live=true "
+      "! pvfdpay "
+      "! appsink name=sink sync=false async=true", NULL));
+
+  if (clock)
+    gst_pipeline_set_clock (pipeline, clock);
+
+  clock_gettime (CLOCK_MONOTONIC, &ts);
+  before = ts.tv_sec * 1000000000 + ts.tv_nsec;
+  sample = send_buffer_through_pipeline (pipeline, gst_buffer_new_wrapped (
+      g_strdup ("hello"), 5));
+  clock_gettime (CLOCK_MONOTONIC, &ts);
+  after = ts.tv_sec * 1000000000 + ts.tv_nsec;
+
+  g_clear_object (&pipeline);
+
+  /* Now we check the data */
+  fail_unless_equals_uint64 (
+      gst_buffer_get_size (gst_sample_get_buffer (sample)), 8*3);
+  gst_buffer_extract (gst_sample_get_buffer (sample), 0, header, 8*3);
+  gst_sample_unref (sample);
+  sample = NULL;
+
+  /* capture_timestamp */
+  fail_unless (header[0] >= before);
+  fail_unless (header[0] <= after);
+
+  fail_unless (header[1] == 0);  /* offset */
+  fail_unless (header[2] == 5);  /* size */
+}
+
+GST_START_TEST (test_that_fdpay_attaches_a_monotonic_timestamp)
+{
+  GstClock * clock = NULL;
+
+  check_monotonic_timestamp_with_clock (NULL);
+
+  clock = g_object_new (GST_TYPE_SYSTEM_CLOCK,
+      "clock-type", GST_CLOCK_TYPE_REALTIME, NULL);
+  check_monotonic_timestamp_with_clock (clock);
+  g_clear_object (&clock);
+}
+
+GST_END_TEST
+
 static Suite *
 socketintegrationtest_suite (void)
 {
@@ -413,6 +501,8 @@ socketintegrationtest_suite (void)
       test_that_zerocopy_doesnt_leak_fds);
   tcase_add_test (tc_chain,
       test_that_we_can_provide_new_socketsrc_sockets_during_signal);
+  tcase_add_test (tc_chain,
+      test_that_fdpay_attaches_a_monotonic_timestamp);
 
   return s;
 }

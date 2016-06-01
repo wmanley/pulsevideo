@@ -1,5 +1,6 @@
 import os
 import pipes
+import re
 import shutil
 import socket
 import subprocess
@@ -55,8 +56,8 @@ def pulsevideo_via_activation(tmpdir):
 
 
 @contextmanager
-def pulsevideo_ctx(tmpdir, source_pipeline=None):
-    with dbus_ctx(tmpdir) as dbus_daemon:
+def pulsevideo_ctx(dir_, source_pipeline=None):
+    with dbus_ctx(dir_) as dbus_daemon:
         pulsevideod = subprocess.Popen(pulsevideo_cmdline(source_pipeline))
         sbus = dbus.SessionBus()
         bus = sbus.get_object('org.freedesktop.DBus', '/')
@@ -90,24 +91,24 @@ def mkdir_p(dirs):
 
 
 @contextmanager
-def dbus_ctx(tmpdir):
-    socket_path = '%s/dbus_socket' % tmpdir
-    mkdir_p('%s/services' % tmpdir)
+def dbus_ctx(dir_):
+    socket_path = '%s/dbus_socket' % dir_
+    mkdir_p('%s/services' % dir_)
 
-    with open('%s/session.conf' % tmpdir, 'w') as out, \
+    with open('%s/session.conf' % dir_, 'w') as out, \
             open('%s/session.conf.in' % os.path.dirname(__file__)) as in_:
         out.write(in_.read()
                   .replace('@DBUS_SOCKET@', socket_path)
-                  .replace('@SERVICEDIR@', "%s/services" % tmpdir))
+                  .replace('@SERVICEDIR@', "%s/services" % dir_))
 
     os.environ['DBUS_SESSION_BUS_ADDRESS'] = 'unix:path=%s' % socket_path
 
     dbus_daemon = subprocess.Popen(
-        ['dbus-daemon', '--config-file=%s/session.conf' % tmpdir, '--nofork'])
+        ['dbus-daemon', '--config-file=%s/session.conf' % dir_, '--nofork'])
     for _ in range(100):
         if os.path.exists(socket_path):
             break
-        assert dbus_daemon.poll() is None, "dbus-daemon failed to start up"
+        assert dbus_daemon.poll() is None, "dbus-daemon failed to start up.  Failed with exit status %i" % dbus_daemon.returncode
         time.sleep(0.1)
     else:
         assert False, "dbus-daemon didn't take socket-path"
@@ -296,3 +297,28 @@ def test_that_invalid_sized_buffers_are_dropped(tmpdir):
         buffers = [x.split() for x in output.strip().split('\n')]
 
         assert 35 < len(buffers) < 65
+
+
+def parse_gst_timestamp(timestamp):
+    m = re.match(r"(\d+):(\d\d):(\d\d\.\d+)", timestamp)
+    if m:
+        return (int(m.group(1)) * 60 * 60 + int(m.group(2)) * 60
+                + float(m.group(3)))
+
+
+def test_that_timestamps_are_preserved(tmpdir):
+    with pulsevideo_ctx(tmpdir, source_pipeline='videotestsrc is-live=false'):
+        try:
+            output = subprocess.check_output(
+                ['gst-launch-1.0', '-q', 'pulsevideosrc',
+                 'bus-name=com.stbtester.VideoSource.test', '!', 'identity',
+                 'error-after=11', '!', 'checksumsink'])
+        except subprocess.CalledProcessError as e:
+            output = e.output
+    buffers = [x.split() for x in output.strip().split('\n')]
+    timestamps = [parse_gst_timestamp(x[0]) for x in buffers]
+    assert len(timestamps) == 10
+    for n in range(1, 9):
+        # The caps specify framerate=1/10, so there should be exactly 0.1s
+        # between frames
+        assert abs(timestamps[n] + 0.1 - timestamps[n + 1]) < 1e-9

@@ -1,5 +1,5 @@
 /* GStreamer
- * Copyright (C) 2014 William Manley <will@williammanley.net>
+ * Copyright (C) 2014-2016 William Manley <will@williammanley.net>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -70,6 +70,8 @@ GST_DEBUG_CATEGORY_STATIC (gst_fdpay_debug_category);
 
 static void gst_fdpay_dispose (GObject * object);
 
+static gboolean gst_fdpay_set_clock (GstElement * element, GstClock * clock);
+
 static GstCaps *gst_fdpay_transform_caps (GstBaseTransform * trans,
     GstPadDirection direction, GstCaps * caps, GstCaps * filter);
 static gboolean gst_fdpay_propose_allocation (GstBaseTransform * trans,
@@ -104,22 +106,24 @@ static void
 gst_fdpay_class_init (GstFdpayClass * klass)
 {
   GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
+  GstElementClass *gst_element_class = GST_ELEMENT_CLASS (klass);
   GstBaseTransformClass *base_transform_class =
       GST_BASE_TRANSFORM_CLASS (klass);
 
   /* Setting up pads and setting metadata should be moved to
      base_class_init if you intend to subclass this class. */
-  gst_element_class_add_pad_template (GST_ELEMENT_CLASS (klass),
+  gst_element_class_add_pad_template (gst_element_class,
       gst_static_pad_template_get (&gst_fdpay_src_template));
-  gst_element_class_add_pad_template (GST_ELEMENT_CLASS (klass),
+  gst_element_class_add_pad_template (gst_element_class,
       gst_static_pad_template_get (&gst_fdpay_sink_template));
 
-  gst_element_class_set_static_metadata (GST_ELEMENT_CLASS (klass),
+  gst_element_class_set_static_metadata (gst_element_class,
       "Simple FD Payloader", "Generic",
       "Simple File-descriptor Payloader for zero-copy video IPC",
       "William Manley <will@williammanley.net>");
 
   gobject_class->dispose = gst_fdpay_dispose;
+  gst_element_class->set_clock = gst_fdpay_set_clock;
   base_transform_class->transform_caps =
       GST_DEBUG_FUNCPTR (gst_fdpay_transform_caps);
   base_transform_class->propose_allocation =
@@ -132,6 +136,8 @@ static void
 gst_fdpay_init (GstFdpay * fdpay)
 {
   fdpay->allocator = gst_tmpfile_allocator_new ();
+  fdpay->monotonic_clock = g_object_new (GST_TYPE_SYSTEM_CLOCK,
+      "clock-type", GST_CLOCK_TYPE_MONOTONIC, NULL);
 }
 
 void
@@ -143,6 +149,7 @@ gst_fdpay_dispose (GObject * object)
 
   /* clean up as possible.  may be called multiple times */
   GST_UNREF(fdpay->allocator);
+  GST_UNREF (fdpay->monotonic_clock);
 
   G_OBJECT_CLASS (gst_fdpay_parent_class)->dispose (object);
 }
@@ -191,6 +198,16 @@ gst_fdpay_propose_allocation (GstBaseTransform * trans,
   return TRUE;
 }
 
+static gboolean
+gst_fdpay_set_clock (GstElement * element, GstClock * clock)
+{
+  GstFdpay *fdpay = GST_FDPAY (element);
+
+  gst_clock_set_master (fdpay->monotonic_clock, clock);
+
+  return TRUE;
+}
+
 static GstMemory *
 gst_fdpay_get_fd_memory (GstFdpay * tmpfilepay, GstBuffer * buffer)
 {
@@ -223,7 +240,8 @@ gst_fdpay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
   GstMapInfo info;
   GError *err = NULL;
   GSocketControlMessage *fdmsg = NULL;
-  FDMessage msg = { 0, 0 };
+  FDMessage msg = { 0, 0, 0 };
+  GstClockTime pipeline_clock_time;
 
   GST_DEBUG_OBJECT (fdpay, "transform_ip");
 
@@ -246,6 +264,19 @@ gst_fdpay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
 
   gst_base_transform_get_allocator (trans, &downstream_allocator, NULL);
   msgmem = gst_allocator_alloc (downstream_allocator, sizeof (FDMessage), NULL);
+
+  if (trans->segment.format == GST_FORMAT_TIME &&
+      GST_CLOCK_TIME_IS_VALID (GST_BUFFER_PTS (buf))) {
+    pipeline_clock_time = GST_ELEMENT (trans)->base_time +
+        gst_segment_to_running_time (
+            &trans->segment, GST_FORMAT_TIME, GST_BUFFER_PTS (buf));
+    GST_OBJECT_LOCK (fdpay->monotonic_clock);
+    msg.capture_timestamp = gst_clock_unadjust_unlocked (
+        fdpay->monotonic_clock, pipeline_clock_time);
+    GST_OBJECT_UNLOCK (fdpay->monotonic_clock);
+  } else {
+    msg.capture_timestamp = 0;
+  }
   gst_memory_map (msgmem, &info, GST_MAP_WRITE);
   memcpy (info.data, &msg, sizeof (msg));
   gst_memory_unmap (msgmem, &info);

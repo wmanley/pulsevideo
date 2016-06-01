@@ -1,5 +1,5 @@
 /* GStreamer
- * Copyright (C) 2014 William Manley <will@williammanley.net>
+ * Copyright (C) 2014-2016 William Manley <will@williammanley.net>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -26,6 +26,9 @@
  * a file-descriptor attached which should be mmapable.  The data in the FD can
  * be found at offset and is size bytes long. */
 typedef struct {
+  /* Time at which the frame was originally captured against the CLOCK_MONOTONIC
+   * in ns */
+  uint64_t capture_timestamp;
   uint64_t offset;
   uint64_t size;
 } FDMessage;

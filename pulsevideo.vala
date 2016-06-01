@@ -3,8 +3,8 @@ using Gst;
 using Posix;
 
 
-[DBus (name = "com.stbtester.VideoSource1")]
-public interface VideoSource1 : GLib.Object {
+[DBus (name = "com.stbtester.VideoSource2")]
+public interface VideoSource2 : GLib.Object {
 
     public abstract string caps { owned get; }
     public abstract GLib.UnixInputStream attach () throws Error;
@@ -16,7 +16,7 @@ GLib.Error ioerror_from_errno (int err_no, string msg)
         msg);
 }
 
-public class VideoSource : GLib.Object, VideoSource1 {
+public class VideoSource : GLib.Object, VideoSource2 {
 
     public string caps { owned get { return caps_; } }
     private string caps_;
@@ -85,7 +85,7 @@ void create_videosource(string source, string caps, GLib.DBusConnection dbus,
     var sink = pipeline.get_by_name("sink");
 
     dbus.register_object(object_path,
-        (VideoSource1) new VideoSource(caps, pipeline, sink));
+        (VideoSource2) new VideoSource(caps, pipeline, sink));
 }
 
 int main (string[] args) {

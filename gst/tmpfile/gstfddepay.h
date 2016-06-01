@@ -1,5 +1,5 @@
 /* GStreamer
- * Copyright (C) 2014 William Manley <will@williammanley.net>
+ * Copyright (C) 2014-2016 William Manley <will@williammanley.net>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -35,6 +35,7 @@ struct _GstFddepay
 {
   GstBaseTransform base_fddepay;
   GstAllocator *fd_allocator;
+  GstClock *monotonic_clock;
 };
 
 struct _GstFddepayClass
