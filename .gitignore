@@ -4,6 +4,9 @@ config.mk
 gst/libgstpulsevideo.so
 gst/gstvideosource1.c
 gst/gstvideosource1.h
+gst/tesseract/gsttesseract.so
+gst/tesseract/gsttesseract.o
+gst/tesseract/gsttextmeta.o
 pulsevideo
 TAGS
 tests/__pycache__

@@ -75,7 +75,23 @@ clean:
 tests/socketintegrationtest : tests/socketintegrationtest.c build/gstnetcontrolmessagemeta.h build/libgstpulsevideo.so
 	gcc -o$@ $< -Wall -Werror $(CFLAGS) $$(pkg-config --cflags --libs $(PKG_DEPS) gstreamer-check-1.0 gstreamer-app-1.0) -Lbuild/ -lgstpulsevideo
 
-check: check-pytest check-gst check-gst-valgrind
+gst/tesseract/gsttextmeta.o : \
+        gst/tesseract/gsttextmeta.c \
+        gst/tesseract/gsttextmeta.h
+	$(CC) -c -o$@ -fPIC $< $$(pkg-config --cflags gstreamer-1.0)
+
+gst/tesseract/gsttesseract.o : \
+        gst/tesseract/gsttesseract.cpp \
+        gst/tesseract/gsttesseract.h \
+        gst/tesseract/gsttextmeta.h
+	$(CXX) -c -o$@ -fPIC $< $$(pkg-config --cflags gstreamer-1.0 gstreamer-video-1.0 tesseract)
+
+gst/tesseract/gsttesseract.so : \
+        gst/tesseract/gsttextmeta.o \
+        gst/tesseract/gsttesseract.o
+	g++ -o$@ -fPIC --shared $^ $$(pkg-config --cflags --libs gstreamer-1.0 gstreamer-video-1.0 tesseract)
+
+check: check-pytest check-gst check-gst-valgrind gst/tesseract/gsttesseract.so
 
 TESTS=tests/
 
