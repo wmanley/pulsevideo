@@ -181,7 +181,11 @@ gst_fddepay_set_clock (GstElement * element, GstClock * clock)
 
   GST_DEBUG_OBJECT (fddepay, "set_clock");
 
-  gst_clock_set_master (fddepay->monotonic_clock, clock);
+  if (!gst_clock_set_master (fddepay->monotonic_clock, clock)) {
+    GST_WARNING_OBJECT (element, "Failed to slave internal MONOTONIC clock %"
+        GST_PTR_FORMAT " to master clock %" GST_PTR_FORMAT,
+        fddepay->monotonic_clock, clock);
+  }
 
   return GST_ELEMENT_CLASS (gst_fddepay_parent_class)->set_clock (element,
       clock);
