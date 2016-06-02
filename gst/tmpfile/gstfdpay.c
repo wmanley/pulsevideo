@@ -205,9 +205,12 @@ gst_fdpay_set_clock (GstElement * element, GstClock * clock)
 {
   GstFdpay *fdpay = GST_FDPAY (element);
 
+  GST_DEBUG_OBJECT (fdpay, "set_clock");
+
   gst_clock_set_master (fdpay->monotonic_clock, clock);
 
-  return TRUE;
+  return GST_ELEMENT_CLASS (gst_fdpay_parent_class)->set_clock (element,
+      clock);
 }
 
 static GstMemory *
