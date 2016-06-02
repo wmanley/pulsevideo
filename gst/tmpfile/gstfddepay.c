@@ -263,10 +263,24 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
     if (GST_ELEMENT (trans)->base_time < pipeline_clock_time) {
       running_time = pipeline_clock_time - GST_ELEMENT (trans)->base_time;
     } else {
+      GST_INFO_OBJECT (trans, "base time < clock time! %" GST_TIME_FORMAT " < "
+          "%" GST_TIME_FORMAT, GST_TIME_ARGS (GST_ELEMENT (trans)->base_time),
+          GST_TIME_ARGS (pipeline_clock_time));
       running_time = 0;
     }
     GST_BUFFER_PTS (buf) = gst_segment_to_position (
         &trans->segment, GST_FORMAT_TIME, running_time);
+
+    GST_DEBUG_OBJECT (trans, "CLOCK_MONOTONIC capture timestamp %"
+        GST_TIME_FORMAT " -> pipeline clock time %" GST_TIME_FORMAT " -> "
+        "running time %" GST_TIME_FORMAT " -> PTS %" GST_TIME_FORMAT,
+        GST_TIME_ARGS (msg.capture_timestamp),
+        GST_TIME_ARGS (pipeline_clock_time), GST_TIME_ARGS (running_time),
+        GST_TIME_ARGS (GST_BUFFER_PTS (buf)));
+
+  } else {
+    GST_INFO_OBJECT (trans, "Can't apply timestamp to buffer: segment.format "
+        "!= GST_FORMAT_TIME");
   }
   return GST_FLOW_OK;
 error:
