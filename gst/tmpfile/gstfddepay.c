@@ -125,6 +125,7 @@ gst_fddepay_init (GstFddepay * fddepay)
   fddepay->fd_allocator = gst_fd_allocator_new ();
   fddepay->monotonic_clock = g_object_new (GST_TYPE_SYSTEM_CLOCK,
       "clock-type", GST_CLOCK_TYPE_MONOTONIC, NULL);
+  GST_OBJECT_FLAG_SET (fddepay->monotonic_clock, GST_CLOCK_FLAG_CAN_SET_MASTER);
 }
 
 void
