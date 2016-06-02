@@ -135,6 +135,8 @@ gst_fdpay_class_init (GstFdpayClass * klass)
 static void
 gst_fdpay_init (GstFdpay * fdpay)
 {
+  GST_OBJECT_FLAG_SET (fdpay, GST_ELEMENT_FLAG_REQUIRE_CLOCK);
+
   fdpay->allocator = gst_tmpfile_allocator_new ();
   fdpay->monotonic_clock = g_object_new (GST_TYPE_SYSTEM_CLOCK,
       "clock-type", GST_CLOCK_TYPE_MONOTONIC, NULL);
