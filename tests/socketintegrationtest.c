@@ -444,7 +444,7 @@ check_monotonic_timestamp_with_clock(GstClock * clock)
       "! appsink name=sink sync=false async=true", NULL));
 
   if (clock)
-    gst_pipeline_set_clock (pipeline, clock);
+    gst_pipeline_use_clock (pipeline, clock);
 
   clock_gettime (CLOCK_MONOTONIC, &ts);
   before = ts.tv_sec * 1000000000 + ts.tv_nsec;
