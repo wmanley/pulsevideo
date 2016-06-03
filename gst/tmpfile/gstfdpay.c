@@ -208,7 +208,16 @@ gst_fdpay_set_clock (GstElement * element, GstClock * clock)
 
   GST_DEBUG_OBJECT (fdpay, "set_clock (%" GST_PTR_FORMAT ")", clock);
 
-  if (!gst_clock_set_master (fdpay->monotonic_clock, clock)) {
+  if (gst_clock_set_master (fdpay->monotonic_clock, clock)) {
+    if (clock) {
+      /* gst_clock_set_master is asynchronous and may take some time to sync.
+       * To give it a helping hand we'll initialise it here so we don't send
+       * through spurious timings with the first buffer. */
+      gst_clock_set_calibration (fdpay->monotonic_clock,
+          gst_clock_get_internal_time (fdpay->monotonic_clock),
+          gst_clock_get_time (clock), 1, 1);
+    }
+  } else {
     GST_WARNING_OBJECT (element, "Failed to slave internal MONOTONIC clock %"
         GST_PTR_FORMAT " to master clock %" GST_PTR_FORMAT,
         fdpay->monotonic_clock, clock);
