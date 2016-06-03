@@ -123,7 +123,7 @@ gst_fdpay_class_init (GstFdpayClass * klass)
       "William Manley <will@williammanley.net>");
 
   gobject_class->dispose = gst_fdpay_dispose;
-  gst_element_class->set_clock = gst_fdpay_set_clock;
+  gst_element_class->set_clock = GST_DEBUG_FUNCPTR (gst_fdpay_set_clock);
   base_transform_class->transform_caps =
       GST_DEBUG_FUNCPTR (gst_fdpay_transform_caps);
   base_transform_class->propose_allocation =
@@ -206,7 +206,7 @@ gst_fdpay_set_clock (GstElement * element, GstClock * clock)
 {
   GstFdpay *fdpay = GST_FDPAY (element);
 
-  GST_DEBUG_OBJECT (fdpay, "set_clock");
+  GST_DEBUG_OBJECT (fdpay, "set_clock (%" GST_PTR_FORMAT ")", clock);
 
   if (!gst_clock_set_master (fdpay->monotonic_clock, clock)) {
     GST_WARNING_OBJECT (element, "Failed to slave internal MONOTONIC clock %"
@@ -294,6 +294,9 @@ gst_fdpay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
 
   gst_buffer_append_memory (buf, msgmem);
   msgmem = NULL;
+
+  GST_DEBUG_OBJECT (trans, "transform_ip: Pushing {capture_timestamp: %lu, "
+      "offset: %lu, size: %lu}", msg.capture_timestamp, msg.offset, msg.size);
 
   return GST_FLOW_OK;
 append_fd_failed:
