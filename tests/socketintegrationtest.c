@@ -484,6 +484,33 @@ GST_START_TEST (test_that_fdpay_attaches_a_monotonic_timestamp)
 
 GST_END_TEST
 
+GST_START_TEST (test_that_buffers_from_fddepay_are_read_only)
+{
+  GstPipeline * pipeline;
+  GstSample * sample;
+  GstMemory * mem;
+  GstMapInfo info;
+
+  pipeline = GST_PIPELINE (gst_parse_launch (
+      "appsrc name=src ! pvfdpay ! pvfddepay ! appsink name=sink", NULL));
+  sample = send_buffer_through_pipeline (pipeline, gst_buffer_new_wrapped (
+      g_strdup ("hello"), 5));
+  g_clear_object (&pipeline);
+
+  mem = gst_buffer_peek_memory (gst_sample_get_buffer(sample), 0);
+
+  fail_unless (GST_MEMORY_IS_READONLY (mem));
+  fail_unless (!gst_memory_map (mem, &info, GST_MAP_READWRITE));
+
+  /* Make sure this test is valid by trying to map at all: */
+  fail_unless (gst_memory_map (mem, &info, GST_MAP_READ));
+  gst_memory_unmap (mem, &info);
+
+  gst_sample_unref (sample);
+}
+
+GST_END_TEST
+
 static Suite *
 socketintegrationtest_suite (void)
 {
@@ -503,6 +530,8 @@ socketintegrationtest_suite (void)
       test_that_we_can_provide_new_socketsrc_sockets_during_signal);
   tcase_add_test (tc_chain,
       test_that_fdpay_attaches_a_monotonic_timestamp);
+  tcase_add_test (tc_chain,
+      test_that_buffers_from_fddepay_are_read_only);
 
   return s;
 }
