@@ -123,7 +123,7 @@ gst_fdpay_class_init (GstFdpayClass * klass)
       "William Manley <will@williammanley.net>");
 
   gobject_class->dispose = gst_fdpay_dispose;
-  gst_element_class->set_clock = gst_fdpay_set_clock;
+  gst_element_class->set_clock = GST_DEBUG_FUNCPTR (gst_fdpay_set_clock);
   base_transform_class->transform_caps =
       GST_DEBUG_FUNCPTR (gst_fdpay_transform_caps);
   base_transform_class->propose_allocation =
@@ -135,9 +135,12 @@ gst_fdpay_class_init (GstFdpayClass * klass)
 static void
 gst_fdpay_init (GstFdpay * fdpay)
 {
+  GST_OBJECT_FLAG_SET (fdpay, GST_ELEMENT_FLAG_REQUIRE_CLOCK);
+
   fdpay->allocator = gst_tmpfile_allocator_new ();
   fdpay->monotonic_clock = g_object_new (GST_TYPE_SYSTEM_CLOCK,
       "clock-type", GST_CLOCK_TYPE_MONOTONIC, NULL);
+  GST_OBJECT_FLAG_SET (fdpay->monotonic_clock, GST_CLOCK_FLAG_CAN_SET_MASTER);
 }
 
 void
@@ -203,9 +206,25 @@ gst_fdpay_set_clock (GstElement * element, GstClock * clock)
 {
   GstFdpay *fdpay = GST_FDPAY (element);
 
-  gst_clock_set_master (fdpay->monotonic_clock, clock);
+  GST_DEBUG_OBJECT (fdpay, "set_clock (%" GST_PTR_FORMAT ")", clock);
 
-  return TRUE;
+  if (gst_clock_set_master (fdpay->monotonic_clock, clock)) {
+    if (clock) {
+      /* gst_clock_set_master is asynchronous and may take some time to sync.
+       * To give it a helping hand we'll initialise it here so we don't send
+       * through spurious timings with the first buffer. */
+      gst_clock_set_calibration (fdpay->monotonic_clock,
+          gst_clock_get_internal_time (fdpay->monotonic_clock),
+          gst_clock_get_time (clock), 1, 1);
+    }
+  } else {
+    GST_WARNING_OBJECT (element, "Failed to slave internal MONOTONIC clock %"
+        GST_PTR_FORMAT " to master clock %" GST_PTR_FORMAT,
+        fdpay->monotonic_clock, clock);
+  }
+
+  return GST_ELEMENT_CLASS (gst_fdpay_parent_class)->set_clock (element,
+      clock);
 }
 
 static GstMemory *
@@ -284,6 +303,9 @@ gst_fdpay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
 
   gst_buffer_append_memory (buf, msgmem);
   msgmem = NULL;
+
+  GST_DEBUG_OBJECT (trans, "transform_ip: Pushing {capture_timestamp: %lu, "
+      "offset: %lu, size: %lu}", msg.capture_timestamp, msg.offset, msg.size);
 
   return GST_FLOW_OK;
 append_fd_failed:
