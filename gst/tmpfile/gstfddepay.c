@@ -267,6 +267,7 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
       msg.offset + msg.size, GST_FD_MEMORY_FLAG_NONE);
   fd = -1;
   gst_memory_resize (fdmem, msg.offset, msg.size);
+  GST_MINI_OBJECT_FLAG_SET (fdmem, GST_MEMORY_FLAG_READONLY);
 
   gst_buffer_remove_all_memory (buf);
   gst_buffer_remove_meta (buf,
