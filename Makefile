@@ -216,8 +216,8 @@ build/libgstpulsevideo.so : \
 		build/gstsocketsrc.c \
 		build/gstrawvideovalidate.h \
 		build/gstrawvideovalidate.c \
-		build/gstvideosource1.c \
-		build/gstvideosource1.h \
+		build/gstvideosource2.c \
+		build/gstvideosource2.h \
 		build/debugutils/gstwatchdog.h \
 		build/debugutils/gstwatchdog.c \
 		build/tcp/gstmultihandlesink.h \
@@ -242,7 +242,7 @@ build/libgstpulsevideo.so : \
 		$$(pkg-config --libs --cflags $(PKG_DEPS)) \
 		-DVERSION=\"$(VERSION)\" -DPACKAGE="\"pulsevideo\""
 
-build/gstvideosource1.c build/gstvideosource1.h : \
+build/gstvideosource2.c build/gstvideosource2.h : \
 		dbus-xml/com.stbtester.VideoSource2.xml
 	cd $(dir $@) && \
 	gdbus-codegen \

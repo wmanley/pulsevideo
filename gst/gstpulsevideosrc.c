@@ -32,7 +32,7 @@
  */
 
 #include "gstpulsevideosrc.h"
-#include "gstvideosource1.h"
+#include "gstvideosource2.h"
 #include <string.h>
 #include <gio/gunixfdlist.h>
 #include <gst/base/gstbasesrc.h>
