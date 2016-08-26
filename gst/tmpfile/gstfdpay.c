@@ -46,7 +46,6 @@
 #include <gst/gst.h>
 #include <gst/allocators/gstfdmemory.h>
 #include <gst/base/gstbasetransform.h>
-#include <gst/video/video.h>
 #include "gstfdpay.h"
 #include "gsttmpfileallocator.h"
 
@@ -76,8 +75,6 @@ static gboolean gst_fdpay_set_clock (GstElement * element, GstClock * clock);
 
 static GstCaps *gst_fdpay_transform_caps (GstBaseTransform * trans,
     GstPadDirection direction, GstCaps * caps, GstCaps * filter);
-static gboolean gst_fdpay_propose_allocation (GstBaseTransform * trans,
-    GstQuery * decide_query, GstQuery * query);
 static GstFlowReturn gst_fdpay_transform_ip (GstBaseTransform * trans,
     GstBuffer * buf);
 
@@ -128,8 +125,6 @@ gst_fdpay_class_init (GstFdpayClass * klass)
   gst_element_class->set_clock = GST_DEBUG_FUNCPTR (gst_fdpay_set_clock);
   base_transform_class->transform_caps =
       GST_DEBUG_FUNCPTR (gst_fdpay_transform_caps);
-  base_transform_class->propose_allocation =
-      GST_DEBUG_FUNCPTR (gst_fdpay_propose_allocation);
   base_transform_class->transform_ip =
       GST_DEBUG_FUNCPTR (gst_fdpay_transform_ip);
 }
@@ -187,67 +182,6 @@ gst_fdpay_transform_caps (GstBaseTransform * trans, GstPadDirection direction,
   } else {
     return othercaps;
   }
-}
-
-/* propose allocation query parameters for input buffers */
-static gboolean
-gst_fdpay_propose_allocation (GstBaseTransform * trans,
-    GstQuery * decide_query, GstQuery * query)
-{
-  GstFdpay *fdpay = GST_FDPAY (trans);
-
-  GstBufferPool *pool = NULL;
-  GstStructure *pool_config = NULL;
-  GstCaps *caps = NULL;
-  gboolean need_pool = FALSE;
-  GstVideoInfo info;
-
-  GST_DEBUG_OBJECT (fdpay, "propose_allocation");
-
-  gst_query_parse_allocation (query, &caps, &need_pool);
-
-  /* Plain Allocator */
-  gst_query_add_allocation_param (query, fdpay->allocator, NULL);
-
-  if (!need_pool) {
-    GST_INFO_OBJECT (fdpay, "No pool requested.  Not proposing pool");
-    goto no_pool;
-  }
-
-  if (caps == NULL) {
-    GST_WARNING_OBJECT (fdpay, "Pool requested but have no configured caps to "
-        "determine size.  Not proposing pool");
-    goto no_pool;
-  }
-
-  if (!gst_video_info_from_caps (&info, caps)) {
-    GST_WARNING_OBJECT (fdpay, "Don't know the appropriate size for caps %"
-        GST_PTR_FORMAT ".  Not proposing pool", caps);
-    goto no_pool;
-  }
-
-  pool_config = gst_structure_new_empty ("pool_config");
-  gst_buffer_pool_config_set_params (pool_config, caps, info.size, 0, 0);
-  gst_buffer_pool_config_set_allocator (pool_config, fdpay->allocator, NULL);
-
-  pool = gst_buffer_pool_new ();
-  if (!gst_buffer_pool_set_config (pool, pool_config)) {
-    GST_WARNING_OBJECT (fdpay, "Failed to set buffer pool config during "
-        "allocation query: Not proposing pool");
-    goto no_pool;
-  }
-
-  GST_INFO_OBJECT (fdpay, "Proposing pool");
-  gst_query_add_allocation_pool (query, pool, 0, 0, 0);
-
-  if (!GST_BASE_TRANSFORM_CLASS (gst_fdpay_parent_class)->propose_allocation (trans,
-          decide_query, query))
-    return FALSE;
-
-no_pool:
-  g_clear_object (&pool);
-
-  return TRUE;
 }
 
 static gboolean
