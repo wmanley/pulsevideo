@@ -304,8 +304,11 @@ gst_fdpay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
   gst_buffer_append_memory (buf, msgmem);
   msgmem = NULL;
 
-  GST_DEBUG_OBJECT (trans, "transform_ip: Pushing {capture_timestamp: %lu, "
-      "offset: %lu, size: %lu}", msg.capture_timestamp, msg.offset, msg.size);
+  GST_DEBUG_OBJECT (trans, "transform_ip: Pushing {"
+      "capture_timestamp: %" G_GUINT64_FORMAT ", "
+      "offset: %" G_GUINT64_FORMAT ", "
+      "size: %" G_GUINT64_FORMAT "}", msg.capture_timestamp, msg.offset,
+      msg.size);
 
   return GST_FLOW_OK;
 append_fd_failed:

@@ -259,8 +259,8 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
     /* Note: This is for sanity and debugging rather than security.  To be
        secure we'd first need to check that it was a sealed memfd. */
     GST_WARNING_OBJECT (fddepay, "fddepay: Received fd %i is too small to "
-        "contain data (%zu < %zu + %zu)", fd, statbuf.st_size, msg.offset,
-        msg.size);
+        "contain data (%zi < %" G_GUINT64_FORMAT " + %" G_GUINT64_FORMAT ")",
+        fd, (ssize_t) statbuf.st_size, msg.offset, msg.size);
     goto error;
   }
   fdmem = gst_fd_allocator_alloc (fddepay->fd_allocator, fd,
