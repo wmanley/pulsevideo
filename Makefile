@@ -205,8 +205,11 @@ build/%.h : gst/%.h Makefile | build/debugutils build/tcp build/tmpfile build/gs
 	      >$@
 
 build/libgstpulsevideo.so : \
+		build/glib_compat.h \
 		build/gst-plugins-base/gst-libs/gst/allocators/gstfdmemory.h \
 		build/gst-plugins-base/gst-libs/gst/allocators/gstfdmemory.c \
+		build/gstpulsevideosink.h \
+		build/gstpulsevideosink.c \
 		build/gstpulsevideosrc.h \
 		build/gstpulsevideosrc.c \
 		build/gstnetcontrolmessagemeta.c \
@@ -216,8 +219,8 @@ build/libgstpulsevideo.so : \
 		build/gstsocketsrc.c \
 		build/gstrawvideovalidate.h \
 		build/gstrawvideovalidate.c \
-		build/gstvideosource1.c \
-		build/gstvideosource1.h \
+		build/gstvideosource2.c \
+		build/gstvideosource2.h \
 		build/debugutils/gstwatchdog.h \
 		build/debugutils/gstwatchdog.c \
 		build/tcp/gstmultihandlesink.h \
@@ -242,7 +245,7 @@ build/libgstpulsevideo.so : \
 		$$(pkg-config --libs --cflags $(PKG_DEPS)) \
 		-DVERSION=\"$(VERSION)\" -DPACKAGE="\"pulsevideo\""
 
-build/gstvideosource1.c build/gstvideosource1.h : \
+build/gstvideosource2.c build/gstvideosource2.h : \
 		dbus-xml/com.stbtester.VideoSource2.xml
 	cd $(dir $@) && \
 	gdbus-codegen \

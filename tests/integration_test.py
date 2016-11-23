@@ -287,16 +287,25 @@ def test_that_invalid_sized_buffers_are_dropped(tmpdir):
 
     # Should mean that only half the buffers (~50) get through:
     source_pipeline = (
-        'videotestsrc num-buffers=100 ! rndbuffersize min=%i max=%i'
+        'videotestsrc pattern=white '
+        '! rndbuffersize min=%i max=%i'
         % (expected_buffer_size - 1, expected_buffer_size + 1))
     with pulsevideo_ctx(tmpdir, source_pipeline=source_pipeline):
         os.environ['GST_DEBUG'] = '3'
-        output = subprocess.check_output(
-            ['gst-launch-1.0', '-q', 'pulsevideosrc',
-             'bus-name=com.stbtester.VideoSource.test', '!', 'checksumsink'])
+        try:
+            subprocess.check_output(
+                ['gst-launch-1.0', '-q', 'pulsevideosrc',
+                 'bus-name=com.stbtester.VideoSource.test',
+                 '!', 'identity', 'error-after=101',
+                 '!', 'checksumsink'])
+        except subprocess.CalledProcessError as e:
+            output = e.output
         buffers = [x.split() for x in output.strip().split('\n')]
+        assert len(buffers) == 100
 
-        assert 35 < len(buffers) < 65
+        # If they were of different sizes the checksum would be different:
+        assert all(x[1] == 'b2fa672f8bba0b9c504e83c5b17ac848f0c14977'
+                   for x in buffers)
 
 
 def parse_gst_timestamp(timestamp):

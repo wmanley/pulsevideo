@@ -2,8 +2,8 @@ build/
 common/
 config.mk
 gst/libgstpulsevideo.so
-gst/gstvideosource1.c
-gst/gstvideosource1.h
+gst/gstvideosource2.c
+gst/gstvideosource2.h
 pulsevideo
 TAGS
 tests/__pycache__
