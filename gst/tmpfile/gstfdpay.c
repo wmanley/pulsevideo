@@ -271,26 +271,78 @@ gst_fdpay_set_clock (GstElement * element, GstClock * clock)
       clock);
 }
 
+#ifdef __arm__
+/*
+ * Faster memcpy on with ARM NEON chips.  See
+ * http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.faqs/ka13544.html
+ * for more information.
+ */
+static inline void
+fast_memcpy(void * restrict dest, const void * restrict src, int n)
+{
+  int remainder = n % 64;
+  n -= remainder;
+  asm volatile (
+      "NEONCopyPLD:                \n"
+      "    PLD [%[src], #0xC0]     \n"
+      "    VLDM %[src]!,{d0-d7}    \n"
+      "    VSTM %[dest]!,{d0-d7}   \n"
+      "    SUBS %[n],%[n],#0x40    \n"
+      "    BGT NEONCopyPLD         \n"
+      : [dest]"+r"(dest), [src]"+r"(src), [n]"+r"(n)
+      :
+      : "d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7", "cc", "memory");
+  memcpy ((guint8*)dest, (const guint8*)src, remainder);
+}
+#else
+static inline void
+fast_memcpy(void * restrict dest, const void * restrict src, int n)
+{
+  memcpy(dest, src, n);
+}
+#endif
+
+
 static GstMemory *
 gst_fdpay_get_fd_memory (GstFdpay * tmpfilepay, GstBuffer * buffer)
 {
-  GstMemory *mem = NULL;
+  GstMemory *out = NULL;
 
   if (gst_buffer_n_memory (buffer) == 1
       && gst_is_fd_memory (gst_buffer_peek_memory (buffer, 0)))
-    mem = gst_buffer_get_memory (buffer, 0);
+    out = gst_buffer_get_memory (buffer, 0);
   else {
-    GstMapInfo info;
+    GstMapInfo src_info, dest_info;
+    GstMemory *mem = NULL;
     GstAllocationParams params = {0, 0, 0, 0};
-    gsize size = gst_buffer_get_size (buffer);
     GST_INFO_OBJECT (tmpfilepay, "Buffer cannot be payloaded without copying");
-    mem = gst_allocator_alloc (tmpfilepay->allocator, size, &params);
-    if (!gst_memory_map (mem, &info, GST_MAP_WRITE))
-      return NULL;
-    gst_buffer_extract (buffer, 0, info.data, size);
-    gst_memory_unmap (mem, &info);
+    if (!gst_buffer_map (buffer, &src_info, GST_MAP_READ)) {
+      GST_ERROR_OBJECT (tmpfilepay, "Failed to map input buffer");
+      goto out2;
+    }
+    mem = gst_allocator_alloc (tmpfilepay->allocator, src_info.size, &params);
+    if (mem == NULL) {
+      GST_ERROR_OBJECT (tmpfilepay, "Failed to create new GstMemory");
+      goto out;
+    }
+    if (!gst_memory_map (mem, &dest_info, GST_MAP_WRITE)) {
+      GST_ERROR_OBJECT (tmpfilepay, "Failed to map output buffer");
+      goto out;
+    }
+
+    fast_memcpy(dest_info.data, src_info.data, src_info.size);
+
+    gst_memory_unmap (mem, &dest_info);
+
+    out = mem;
+    mem = NULL;
+out:
+    gst_buffer_unmap (buffer, &src_info);
+out2:
+    if (mem)
+      gst_memory_unref (mem);
   }
-  return mem;
+  return out;
 }
 
 static GstFlowReturn
