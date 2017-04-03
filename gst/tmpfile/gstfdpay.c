@@ -203,6 +203,10 @@ gst_fdpay_propose_allocation (GstBaseTransform * trans,
 
   GST_DEBUG_OBJECT (fdpay, "propose_allocation");
 
+  if (!GST_BASE_TRANSFORM_CLASS (gst_fdpay_parent_class)->propose_allocation (trans,
+          decide_query, query))
+    return FALSE;
+
   gst_query_parse_allocation (query, &caps, &need_pool);
 
   /* Plain Allocator */
