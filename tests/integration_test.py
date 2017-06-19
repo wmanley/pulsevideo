@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections import namedtuple
 from contextlib import contextmanager
 
 import dbus
@@ -37,6 +38,9 @@ def pulsevideo_cmdline(source_pipeline=None):
             '--bus-name-suffix=test']
 
 
+TestCtx = namedtuple('TestCtx', 'bus pulsevideod')
+
+
 @pytest.yield_fixture(scope='function')
 def pulsevideo_via_activation(tmpdir):
     mkdir_p('%s/services' % tmpdir)
@@ -51,22 +55,24 @@ def pulsevideo_via_activation(tmpdir):
                      ' '.join(pipes.quote(x) for x in pulsevideo_cmdline()))
             .replace('@TMPDIR@', tmpdir))
 
-    with dbus_ctx(tmpdir):
-        yield
+    with dbus_ctx(tmpdir) as (_, bus_address):
+        import dbus
+        yield TestCtx(dbus.bus.BusConnection(bus_address), None)
 
 
 @contextmanager
 def pulsevideo_ctx(dir_, source_pipeline=None):
-    with dbus_ctx(dir_) as dbus_daemon:
+    with dbus_ctx(dir_) as (dbus_daemon, bus_address):
         pulsevideod = subprocess.Popen(pulsevideo_cmdline(source_pipeline))
-        sbus = dbus.SessionBus()
+        sbus = dbus.bus.BusConnection(bus_address)
         bus = sbus.get_object('org.freedesktop.DBus', '/')
         assert dbus_daemon.poll() is None
         wait_until(
             lambda: 'com.stbtester.VideoSource.capture' in bus.ListNames())
-        yield pulsevideod
+        yield TestCtx(sbus, pulsevideod)
         pulsevideod.kill()
         pulsevideod.wait()
+        sbus.close()
 
 
 @pytest.yield_fixture(scope='function')
@@ -77,8 +83,8 @@ def pulsevideo(tmpdir):
 
 @pytest.yield_fixture(scope='function')
 def dbus_fixture(tmpdir):
-    with dbus_ctx(tmpdir):
-        yield
+    with dbus_ctx(tmpdir) as x:
+        yield x
 
 
 def mkdir_p(dirs):
@@ -101,8 +107,6 @@ def dbus_ctx(dir_):
                   .replace('@DBUS_SOCKET@', socket_path)
                   .replace('@SERVICEDIR@', "%s/services" % dir_))
 
-    os.environ['DBUS_SESSION_BUS_ADDRESS'] = 'unix:path=%s' % socket_path
-
     dbus_daemon = subprocess.Popen(
         ['dbus-daemon', '--config-file=%s/session.conf' % dir_, '--nofork'])
     for _ in range(100):
@@ -113,8 +117,11 @@ def dbus_ctx(dir_):
     else:
         assert False, "dbus-daemon didn't take socket-path"
 
+    address = 'unix:path=%s' % socket_path
+    os.environ['DBUS_SESSION_BUS_ADDRESS'] = address
+
     try:
-        yield dbus_daemon
+        yield dbus_daemon, address
     finally:
         os.remove(socket_path)
         dbus_daemon.kill()
@@ -181,7 +188,8 @@ def test_that_pulsevideosrc_recovers_if_pulsevideo_crashes(
     fc = FrameCounter(gst_launch.stdout)
     fc.start()
     assert wait_until(lambda: fc.count > 1)
-    obj = dbus.SessionBus().get_object('org.freedesktop.DBus', '/')
+    bus = pulsevideo_via_activation.bus
+    obj = bus.get_object('org.freedesktop.DBus', '/')
     pulsevideo_pid = obj.GetConnectionUnixProcessID(
         'com.stbtester.VideoSource.test')
     os.kill(pulsevideo_pid, 9)
@@ -214,7 +222,7 @@ def test_that_pulsevideosrc_gets_eos_if_pulsevideo_crashes_and_cant_be_activated
     fc = FrameCounter(gst_launch.stdout)
     fc.start()
     assert wait_until(lambda: fc.count > 1)
-    pulsevideo.kill()
+    pulsevideo.pulsevideod.kill()
     assert wait_until(lambda: gst_launch.poll() is not None, 2)
     assert gst_launch.returncode == 0
 
@@ -229,10 +237,10 @@ def test_that_pulsevideo_doesnt_leak_fds(pulsevideo):
     fc.start()
     assert wait_until(lambda: fc.count > 1)
     client_fd_count_1 = count_fds(gst_launch.pid)
-    server_fd_count_1 = count_fds(pulsevideo.pid)
+    server_fd_count_1 = count_fds(pulsevideo.pulsevideod.pid)
     assert wait_until(lambda: fc.count > 20)
     client_fd_count_20 = count_fds(gst_launch.pid)
-    server_fd_count_20 = count_fds(pulsevideo.pid)
+    server_fd_count_20 = count_fds(pulsevideo.pulsevideod.pid)
 
     assert (client_fd_count_20 - client_fd_count_1) < 5
     assert (server_fd_count_20 - server_fd_count_1) < 5
