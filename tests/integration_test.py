@@ -2,6 +2,7 @@ import os
 import pipes
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import tempfile
@@ -339,3 +340,17 @@ def test_that_timestamps_are_preserved(tmpdir):
         # The caps specify framerate=1/10, so there should be exactly 0.1s
         # between frames
         assert abs(timestamps[n] + 0.1 - timestamps[n + 1]) < 1e-9
+
+
+def test_that_pulsevideosrc_forwards_manual_eos(pulsevideo):
+    env = os.environ.copy()
+    env['GST_DEBUG'] = \
+        '4,bin:5,GST_EVENT:5,GST_ELEMENT_PADS:5,basesrc:4,socketsrc:4'
+
+    # Passing the -e flag causes gst-launch to send EOS on shutdown
+    gst_launch = subprocess.Popen(
+        ['gst-launch-1.0', '-em', 'pulsevideosrc',
+         'bus-name=com.stbtester.VideoSource.test', '!', 'fakesink'], env=env)
+    time.sleep(3)
+    gst_launch.send_signal(signal.SIGINT)
+    assert gst_launch.wait() == signal.SIGINT
