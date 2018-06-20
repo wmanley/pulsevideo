@@ -184,12 +184,30 @@ gst_fddepay_set_clock (GstElement * element, GstClock * clock)
 
   if (gst_clock_set_master (fddepay->monotonic_clock, clock)) {
     if (clock) {
-      /* gst_clock_set_master is asynchronous and may take some time to sync.
-       * To give it a helping hand we'll initialise it here so we don't send
-       * through spurious timings with the first buffer. */
-      gst_clock_set_calibration (fddepay->monotonic_clock,
-          gst_clock_get_internal_time (fddepay->monotonic_clock),
-          gst_clock_get_time (clock), 1, 1);
+      GstClockTime mono_before, mono_after, master_time;
+      GstClockTimeDiff offset, elapsed;
+
+      do {
+        /* If there was a context switch during this check our time mapping will
+         * be inaccurate.  `elapsed` puts a bound on our inaccuracy.  10us
+         * accuracy should be fine, it's less than 1/2 a sample at 48kHz */
+        mono_before = gst_clock_get_internal_time (fddepay->monotonic_clock);
+        master_time = gst_clock_get_internal_time (clock);
+        mono_after = gst_clock_get_internal_time (fddepay->monotonic_clock);
+        elapsed = mono_after - mono_before;
+      } while (elapsed > 10 * GST_USECOND);
+
+      offset = mono_before + (mono_after - mono_before) / 2;
+      if (offset > 10 * GST_USECOND) {
+        /* gst_clock_set_master is asynchronous and may take some time to sync.
+         * To give it a helping hand we'll initialise it here so we don't send
+         * through spurious timings with the first buffer. */
+        gst_clock_set_calibration (fddepay->monotonic_clock,
+            mono_before + (mono_after - mono_before) / 2,
+            master_time, 1, 1);
+      } else {
+        gst_clock_set_calibration (fddepay->monotonic_clock, 0, 0, 1, 1);
+      }
     }
   } else {
     GST_WARNING_OBJECT (element, "Failed to slave internal MONOTONIC clock %"
