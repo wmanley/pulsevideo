@@ -178,6 +178,9 @@ gst_pulsevideo_src_finalize (GObject * gobject)
 {
   GstPulseVideoSrc *this = GST_PULSEVIDEO_SRC (gobject);
 
+  g_signal_handlers_disconnect_by_func (this->socketsrc,
+      G_CALLBACK (on_socket_eos), gobject);
+
   g_free (this->bus_name);
   this->bus_name = NULL;
   g_free (this->object_path);
