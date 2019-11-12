@@ -53,8 +53,6 @@ struct _GstPulseVideoSrc {
   GDBusConnection *dbus;
   gchar *bus_name;
   gchar *object_path;
-
-  GDBusProxy *videosource;
 };
 
 struct _GstPulseVideoSrcClass {

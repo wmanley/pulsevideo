@@ -69,7 +69,6 @@ G_DEFINE_TYPE (GstPulseVideoSrc, gst_pulsevideo_src, GST_TYPE_BIN);
 
 static void gst_pulsevideo_src_finalize (GObject * gobject);
 
-static gboolean gst_pulsevideo_src_stop (GstPulseVideoSrc * bsrc);
 static gboolean gst_pulsevideo_src_start (GstPulseVideoSrc * bsrc);
 
 static void gst_pulsevideo_src_set_property (GObject * object, guint prop_id,
@@ -182,7 +181,6 @@ gst_pulsevideo_src_finalize (GObject * gobject)
   g_free (this->object_path);
   g_clear_object (&this->cancellable);
   g_clear_object (&this->dbus);
-  g_clear_object (&this->videosource);
   g_clear_object (&this->socketsrc);
   g_clear_object (&this->fddepay);
   g_clear_object (&this->capsfilter);
@@ -285,7 +283,6 @@ gst_pulsevideo_src_change_state (GstElement * element,
 
   if (transition == GST_STATE_CHANGE_PAUSED_TO_READY) {
     g_cancellable_cancel (src->cancellable);
-    gst_pulsevideo_src_stop ((GstPulseVideoSrc *)element);
   }
 
   return result;
@@ -436,20 +433,4 @@ gst_pulsevideo_src_start (GstPulseVideoSrc * src)
   }
 
   return ret;
-}
-
-static gboolean
-gst_pulsevideo_src_stop (GstPulseVideoSrc * bsrc)
-{
-  GstPulseVideoSrc *src = GST_PULSEVIDEO_SRC (bsrc);
-
-  GDBusProxy *videosource = NULL;
-
-  GST_OBJECT_LOCK (src);
-  SWAP (videosource, src->videosource);
-  GST_OBJECT_UNLOCK (src);
-
-  g_clear_object (&videosource);
-
-  return TRUE;
 }
