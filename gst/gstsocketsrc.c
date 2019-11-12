@@ -118,7 +118,7 @@ gst_socket_src_class_init (GstSocketSrcClass * klass)
   gst_socket_src_signals[ON_SOCKET_EOS] =
     g_signal_new ("on-socket-eos", G_TYPE_FROM_CLASS (klass),
         G_SIGNAL_RUN_FIRST, G_STRUCT_OFFSET (GstSocketSrcClass, on_socket_eos),
-        NULL, NULL, NULL, G_TYPE_NONE, 0);
+        NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_CANCELLABLE);
 
   gst_element_class_add_pad_template (gstelement_class,
       gst_static_pad_template_get (&srctemplate));
@@ -211,7 +211,8 @@ retry:
 
     /* We've hit EOS but we'll send this signal to allow someone to change
      * our socket before we send EOS downstream. */
-    g_signal_emit (src, gst_socket_src_signals[ON_SOCKET_EOS], 0);
+    g_signal_emit (src, gst_socket_src_signals[ON_SOCKET_EOS], 0,
+        src->cancellable);
 
     GST_OBJECT_LOCK (src);
 

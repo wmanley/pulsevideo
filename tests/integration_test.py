@@ -2,8 +2,8 @@ import os
 import pipes
 import re
 import shutil
+import signal
 import socket
-import subprocess
 import tempfile
 import threading
 import time
@@ -13,6 +13,7 @@ from textwrap import dedent
 
 import dbus
 import pytest
+import subprocess32 as subprocess
 
 
 @pytest.yield_fixture(scope='function')
@@ -350,6 +351,51 @@ def test_that_invalid_sized_buffers_are_dropped(tmpdir):
         # If they were of different sizes the checksum would be different:
         assert all(x[1] == 'b2fa672f8bba0b9c504e83c5b17ac848f0c14977'
                    for x in buffers)
+
+
+def test_that_teardown_succeeds_during_error_recovery(tmpdir):
+    with pulsevideo_via_activation(tmpdir):
+        cmd = shquote(pulsevideo_cmdline())
+
+        # Pipe used to signal back to the test that we've entered error-recovery
+        os.mkfifo("%s/fifo" % tmpdir)
+        with open("%s/pulsevideo" % tmpdir, 'w') as f:
+            f.write(dedent("""\
+                #!/bin/bash -ex
+
+                progress=$(cat {tmpdir}/progress || echo 0)
+                echo $((progress + 1)) >{tmpdir}/progress
+                case $progress in
+                0)
+                    export fdpay_buffer="skip skip gerror"
+                ;;
+                *)
+                    echo " " >{tmpdir}/fifo
+                    exit 0
+                ;;
+                esac
+                exec {cmd}
+                """.format(tmpdir=tmpdir, cmd=cmd)))
+
+        os.environ['GST_DEBUG'] = "3,*videosource*:9"
+        gst_launch = subprocess.Popen(
+            ['gst-launch-1.0', '-q', 'pulsevideosrc',
+             'bus-name=com.stbtester.VideoSource.test', '!', 'fdsink'],
+            stdout=subprocess.PIPE)
+        fc = FrameCounter(gst_launch.stdout)
+        fc.start()
+        assert wait_until(lambda: fc.count > 0)
+
+        # Wait for pulsevideosrc error recovery mode to kick in:
+        with open("%s/fifo" % tmpdir) as f:
+            f.read()
+
+        # Now we know that the pulsevideosrc is in error recovery mode blocked
+        # on a DBus call.  Tell it to stop:
+        gst_launch.send_signal(signal.SIGINT)
+
+        # DBus timeout takes 25s, we should be done much quicker than that:
+        assert gst_launch.wait(5) is not None
 
 
 def parse_gst_timestamp(timestamp):
