@@ -281,11 +281,13 @@ gst_pulsevideo_src_change_state (GstElement * element,
     }
   }
 
-  if ((result = GST_ELEMENT_CLASS (parent_class)->change_state (element,
-              transition)) == GST_STATE_CHANGE_FAILURE)
-    goto failure;
+  /* This will cause our child elements to change state too. */
+  result = GST_ELEMENT_CLASS (parent_class)->change_state (element, transition);
+  if (result == GST_STATE_CHANGE_FAILURE)
+    GST_DEBUG_OBJECT (src, "parent failed state change");
 
   if (transition == GST_STATE_CHANGE_PAUSED_TO_READY) {
+    g_object_set (src->socketsrc, "socket", NULL, NULL);
   }
 
   return result;
