@@ -31,6 +31,7 @@
  * </refsect2>
  */
 
+#include "glib_compat.h"
 #include "gstpulsevideosrc.h"
 #include "gstvideosource2.h"
 #include <string.h>
@@ -307,7 +308,7 @@ gst_pulsevideo_src_reinit (GstPulseVideoSrc * src, GError **error)
 
   GstVideoSource2 *videosource = NULL;
   gboolean ret = PV_INIT_FAILURE;
-  const gchar *scaps = NULL;
+  gchar *scaps = NULL;
   GstCaps *caps = NULL;
   GUnixFDList *fdlist = NULL;
   gint *fds = NULL;
@@ -337,27 +338,18 @@ gst_pulsevideo_src_reinit (GstPulseVideoSrc * src, GError **error)
     goto done;
   }
 
-  scaps = gst_video_source2_get_caps (videosource);
-  if (!scaps) {
+  if (!gst_video_source2_call_attach_sync (videosource, NULL, NULL, &scaps,
+          &fdlist, src->cancellable, &err)) {
     ret = PV_INIT_NOOBJECT;
-    g_set_error(&err, g_quark_from_static_string ("pv-read-caps-error-quark"),
-        PV_INIT_FAILURE, "Could not read remote caps from %s on %s",
-        object_path, bus_name);
     goto done;
   }
-  caps = gst_caps_from_string (scaps);
-  scaps = NULL;
+
+  g_assert (scaps);
+  caps = gst_caps_from_string (g_steal_pointer (&scaps));
   g_object_set (src->capsfilter, "caps", caps, NULL);
 
   GST_INFO_OBJECT (src, "Received remote caps %" GST_PTR_FORMAT, caps);
-  gst_caps_unref (caps);
-  caps = NULL;
-
-  if (!gst_video_source2_call_attach_sync (videosource, NULL, NULL, &fdlist,
-          src->cancellable, &err)) {
-    ret = PV_INIT_NOOBJECT;
-    goto done;
-  }
+  gst_caps_unref (g_steal_pointer (&caps));
 
   fds = g_unix_fd_list_steal_fds (fdlist, NULL);
   socket = g_socket_new_from_fd (fds[0], &err);

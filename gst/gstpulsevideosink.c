@@ -66,8 +66,8 @@ G_DEFINE_TYPE (GstPulseVideoSink, gst_pulsevideo_sink, GST_TYPE_BIN);
 static void gst_pulsevideo_sink_dispose (GObject * gobject);
 static void gst_pulsevideo_sink_finalize (GObject * gobject);
 
-static gboolean gst_pulsevideo_sink_stop (GstPulseVideoSink * bsink);
-static gboolean gst_pulsevideo_sink_start (GstPulseVideoSink * bsink);
+static gboolean gst_pulsevideo_sink_deregister_dbus (GstPulseVideoSink * bsink);
+static gboolean gst_pulsevideo_sink_register_dbus (GstPulseVideoSink * bsink);
 
 static void gst_pulsevideo_sink_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec);
@@ -285,18 +285,19 @@ gst_pulsevideo_sink_change_state (GstElement * element,
 
   sink = GST_PULSEVIDEO_SINK (element);
 
-  if (transition == GST_STATE_CHANGE_READY_TO_PAUSED) {
-    if (!gst_pulsevideo_sink_start ((GstPulseVideoSink*) element)) {
-      result = GST_STATE_CHANGE_FAILURE;
-      goto failure;
-    }
+  if (transition == GST_STATE_CHANGE_PAUSED_TO_READY) {
+    gst_pulsevideo_sink_deregister_dbus ((GstPulseVideoSink *)element);
   }
+
   if ((result = GST_ELEMENT_CLASS (parent_class)->change_state (element,
               transition)) == GST_STATE_CHANGE_FAILURE)
     goto failure;
 
-  if (transition == GST_STATE_CHANGE_PAUSED_TO_READY) {
-    gst_pulsevideo_sink_stop ((GstPulseVideoSink *)element);
+  if (transition == GST_STATE_CHANGE_READY_TO_PAUSED) {
+    if (!gst_pulsevideo_sink_register_dbus ((GstPulseVideoSink*) element)) {
+      result = GST_STATE_CHANGE_FAILURE;
+      goto failure;
+    }
   }
 
   return result;
@@ -306,6 +307,15 @@ failure:
   {
     GST_DEBUG_OBJECT (sink, "parent failed state change");
     return result;
+  }
+}
+
+static void
+gst_clear_caps (GstCaps **pcaps)
+{
+  if (*pcaps) {
+    gst_caps_unref (*pcaps);
+    *pcaps = NULL;
   }
 }
 
@@ -323,6 +333,9 @@ on_handle_attach (GstVideoSource2         *interface,
   GUnixFDList *their_socket_list = NULL;
   GError * gerror = NULL;
   int error = 0;
+  GstPad *inpad = NULL;
+  GstCaps *caps = NULL;
+  gchar *caps_str = NULL;
 
   GST_DEBUG_OBJECT (sink, "Attaching client");
 
@@ -345,9 +358,19 @@ on_handle_attach (GstVideoSource2         *interface,
 
   g_signal_emit_by_name (sink->socketsink, "add", our_socket, NULL);
 
+  inpad = gst_element_get_static_pad (sink->fdpay, "sink");
+  g_assert (inpad);
+  caps = gst_pad_get_current_caps (inpad);
+  /* We will always have caps at this point because we don't register the dbus
+   * callback untile the child elements are at least in state PAUSED, so should
+   * have completed caps negotiation */
+  if (!caps)
+    goto out;
+  caps_str = gst_caps_to_string (caps);
+
   gst_video_source2_complete_attach (
       g_steal_pointer(&interface), invocation, their_socket_list,
-      their_socket_idx);
+      their_socket_idx, caps_str);
 
 out:
   if (gerror) {
@@ -356,6 +379,9 @@ out:
         g_steal_pointer(&invocation), gerror);
     g_clear_error (&gerror);
   }
+  g_free (caps_str);
+  gst_clear_caps (&caps);
+  g_clear_object (&inpad);
   close (fds[0]);
   close (fds[1]);
   g_clear_object (&our_socket);
@@ -378,7 +404,7 @@ GDBusConnection * connect_to_dbus(GDBusConnection * connection, GError ** error)
 
 /* create a socket for connecting to remote server */
 static gboolean
-gst_pulsevideo_sink_start (GstPulseVideoSink * sink)
+gst_pulsevideo_sink_register_dbus (GstPulseVideoSink * sink)
 {
   GError *error = NULL;
   gboolean ret = FALSE;
@@ -409,7 +435,7 @@ out:
 }
 
 static gboolean
-gst_pulsevideo_sink_stop (GstPulseVideoSink * bsink)
+gst_pulsevideo_sink_deregister_dbus (GstPulseVideoSink * bsink)
 {
   GstPulseVideoSink *sink = GST_PULSEVIDEO_SINK (bsink);
 
