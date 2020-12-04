@@ -159,12 +159,10 @@ gst_pulsevideo_src_init (GstPulseVideoSrc * this)
   gst_bin_add (GST_BIN (this), gst_object_ref (this->socketsrc));
   this->fddepay = gst_element_factory_make ("pvfddepay", NULL);
   gst_bin_add (GST_BIN (this), gst_object_ref (this->fddepay));
-  this->capsfilter = gst_element_factory_make ("capsfilter", NULL);
-  gst_bin_add (GST_BIN (this), gst_object_ref (this->capsfilter));
   rawvideovalidate = gst_element_factory_make ("rawvideovalidate", NULL);
   gst_bin_add (GST_BIN (this), rawvideovalidate);
   gst_element_link_many (
-        this->socketsrc, this->fddepay, this->capsfilter, rawvideovalidate,
+        this->socketsrc, this->fddepay, rawvideovalidate,
         NULL);
 
   internal_pad = gst_element_get_static_pad (rawvideovalidate, "src");
@@ -190,7 +188,6 @@ gst_pulsevideo_src_finalize (GObject * gobject)
   g_clear_object (&this->dbus);
   g_clear_object (&this->socketsrc);
   g_clear_object (&this->fddepay);
-  g_clear_object (&this->capsfilter);
 
   G_OBJECT_CLASS (parent_class)->finalize (gobject);
 }
@@ -391,9 +388,9 @@ gst_pulsevideo_src_reinit (GstPulseVideoSrc * src, GCancellable* cancellable,
 
   g_assert (scaps);
   caps = gst_caps_from_string (g_steal_pointer (&scaps));
-  g_object_set (src->capsfilter, "caps", caps, NULL);
 
   GST_INFO_OBJECT (src, "Received remote caps %" GST_PTR_FORMAT, caps);
+  g_object_set (src->socketsrc, "caps", caps, NULL);
   gst_caps_unref (g_steal_pointer (&caps));
 
   fds = g_unix_fd_list_steal_fds (fdlist, NULL);

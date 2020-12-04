@@ -83,8 +83,6 @@ static GstFlowReturn gst_fdpay_transform_ip (GstBaseTransform * trans,
 
 /* pad templates */
 
-static GstStaticCaps fd_caps = GST_STATIC_CAPS ("application/x-fd");
-
 static GstStaticPadTemplate gst_fdpay_src_template =
 GST_STATIC_PAD_TEMPLATE ("src",
     GST_PAD_SRC,
@@ -159,6 +157,15 @@ gst_fdpay_dispose (GObject * object)
   G_OBJECT_CLASS (gst_fdpay_parent_class)->dispose (object);
 }
 
+static gboolean
+pay_caps (GstCapsFeatures * features, GstStructure * structure, gpointer user_data)
+{
+  gst_structure_set (structure, "payloaded-name", G_TYPE_STRING,
+      gst_structure_get_name (structure), NULL);
+  gst_structure_set_name (structure, "application/x-fd");
+  return TRUE;
+}
+
 static GstCaps *
 gst_fdpay_transform_caps (GstBaseTransform * trans, GstPadDirection direction,
     GstCaps * caps, GstCaps * filter)
@@ -168,13 +175,13 @@ gst_fdpay_transform_caps (GstBaseTransform * trans, GstPadDirection direction,
 
   GST_DEBUG_OBJECT (fdpay, "transform_caps");
 
-
   if (direction == GST_PAD_SRC) {
     /* transform caps going upstream */
     othercaps = gst_caps_new_any ();
   } else {
     /* transform caps going downstream */
-    othercaps = gst_static_caps_get (&fd_caps);
+    othercaps = gst_caps_copy (caps);
+    gst_caps_map_in_place (othercaps, pay_caps, fdpay);
   }
 
   if (filter) {

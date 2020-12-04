@@ -359,7 +359,7 @@ on_handle_attach (GstVideoSource2         *interface,
 
   g_signal_emit_by_name (sink->socketsink, "add", our_socket, NULL);
 
-  inpad = gst_element_get_static_pad (sink->fdpay, "sink");
+  inpad = gst_element_get_static_pad (sink->socketsink, "sink");
   g_assert (inpad);
   caps = gst_pad_get_current_caps (inpad);
   /* We should have caps at this point because we don't register the dbus

@@ -48,7 +48,6 @@ struct _GstPulseVideoSrc {
   /*< private >*/
   GstElement *socketsrc;
   GstElement *fddepay;
-  GstElement *capsfilter;
   GDBusConnection *dbus;
   gchar *bus_name;
   gchar *object_path;

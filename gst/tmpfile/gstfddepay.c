@@ -1,5 +1,5 @@
 /* GStreamer
- * Copyright (C) 2014-2016 William Manley <will@williammanley.net>
+ * Copyright (C) 2014-2020 William Manley <will@williammanley.net>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -66,8 +66,6 @@ static GstFlowReturn gst_fddepay_transform_ip (GstBaseTransform * trans,
     GstBuffer * buf);
 
 /* pad templates */
-
-static GstStaticCaps fd_caps = GST_STATIC_CAPS ("application/x-fd");
 
 static GstStaticPadTemplate gst_fddepay_src_template =
 GST_STATIC_PAD_TEMPLATE ("src",
@@ -145,6 +143,28 @@ gst_fddepay_dispose (GObject * object)
   G_OBJECT_CLASS (gst_fddepay_parent_class)->dispose (object);
 }
 
+static gboolean
+depay_caps (GstCapsFeatures * features, GstStructure * structure, gpointer user_data)
+{
+  const gchar * name = gst_structure_get_string (structure, "payloaded-name");
+  if (name) {
+    gst_structure_set_name (structure, name);
+    gst_structure_remove_field (structure, "payloaded-name");
+  } else {
+    GST_WARNING_OBJECT (user_data, "Caps didn't contain payloaded-name");
+  }
+  return TRUE;
+}
+
+static gboolean
+pay_caps (GstCapsFeatures * features, GstStructure * structure, gpointer user_data)
+{
+  gst_structure_set (structure, "payloaded-name", G_TYPE_STRING,
+      gst_structure_get_name (structure), NULL);
+  gst_structure_set_name (structure, "application/x-fd");
+  return TRUE;
+}
+
 static GstCaps *
 gst_fddepay_transform_caps (GstBaseTransform * trans, GstPadDirection direction,
     GstCaps * caps, GstCaps * filter)
@@ -154,13 +174,13 @@ gst_fddepay_transform_caps (GstBaseTransform * trans, GstPadDirection direction,
 
   GST_DEBUG_OBJECT (fddepay, "transform_caps");
 
-
+  othercaps = gst_caps_copy (caps);
   if (direction == GST_PAD_SRC) {
     /* transform caps going upstream */
-    othercaps = gst_static_caps_get (&fd_caps);
+    gst_caps_map_in_place (othercaps, pay_caps, NULL);
   } else {
     /* transform caps going downstream */
-    othercaps = gst_caps_new_any ();
+    gst_caps_map_in_place (othercaps, depay_caps, NULL);
   }
 
   if (filter) {

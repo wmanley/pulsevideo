@@ -300,6 +300,19 @@ def test_that_we_can_tee_fddepay():
     assert wait_until(lambda: fc2.count > 1)
 
 
+def test_pay_depay():
+    os.environ['GST_DEBUG'] = "4,*videosource*:9"
+    CAPS = 'video/x-raw,format=RGB,width=320,height=240,framerate=10/1'
+    gst_launch = subprocess.Popen(
+        ['gst-launch-1.0', 'videotestsrc', 'is-live=true', '!', CAPS,
+         '!', 'pvfdpay', '!', 'pvfddepay', '!', 'fdsink', 'fd=1'],
+         stdout=subprocess.PIPE)
+    fc1 = FrameCounter(gst_launch.stdout)
+    fc1.start()
+
+    assert wait_until(lambda: fc1.count > 1)
+
+
 def test_that_backing_memory_is_not_reused(pulsevideo):
     """
     This is a regression test.  There used to be a problem where only one
