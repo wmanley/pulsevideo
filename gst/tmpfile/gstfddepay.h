@@ -20,7 +20,7 @@
 #ifndef _GST_FDDEPAY_H_
 #define _GST_FDDEPAY_H_
 
-#include <gst/base/gstbasetransform.h>
+#include <gst/base/gstbaseparse.h>
 
 G_BEGIN_DECLS
 #define GST_TYPE_FDDEPAY   (gst_fddepay_get_type())
@@ -33,14 +33,14 @@ typedef struct _GstFddepayClass GstFddepayClass;
 
 struct _GstFddepay
 {
-  GstBaseTransform base_fddepay;
+  GstBaseParse base_fddepay;
   GstAllocator *fd_allocator;
   GstClock *monotonic_clock;
 };
 
 struct _GstFddepayClass
 {
-  GstBaseTransformClass base_fddepay_class;
+  GstBaseParseClass base_fddepay_class;
 };
 
 GType gst_fddepay_get_type (void);

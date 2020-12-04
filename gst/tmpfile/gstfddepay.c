@@ -39,7 +39,7 @@
 #include "../gstnetcontrolmessagemeta.h"
 
 #include <gst/gst.h>
-#include <gst/base/gstbasetransform.h>
+#include <gst/base/gstbaseparse.h>
 #include <gst/allocators/gstfdmemory.h>
 #include <gio/gunixfdmessage.h>
 
@@ -58,12 +58,11 @@ GST_DEBUG_CATEGORY_STATIC (gst_fddepay_debug_category);
 
 static gboolean gst_fddepay_set_clock (GstElement * element,
     GstClock * clock);
-static GstCaps *gst_fddepay_transform_caps (GstBaseTransform * trans,
-    GstPadDirection direction, GstCaps * caps, GstCaps * filter);
+static gboolean gst_fddepay_set_sink_caps (GstBaseParse * parse,
+    GstCaps * caps);
 static void gst_fddepay_dispose (GObject * object);
-
-static GstFlowReturn gst_fddepay_transform_ip (GstBaseTransform * trans,
-    GstBuffer * buf);
+static GstFlowReturn gst_fddepay_handle_frame (GstBaseParse * parse,
+    GstBaseParseFrame * frame, gint * skipsize);
 
 /* pad templates */
 
@@ -82,7 +81,7 @@ GST_STATIC_PAD_TEMPLATE ("sink",
 
 /* class initialization */
 
-G_DEFINE_TYPE_WITH_CODE (GstFddepay, gst_fddepay, GST_TYPE_BASE_TRANSFORM,
+G_DEFINE_TYPE_WITH_CODE (GstFddepay, gst_fddepay, GST_TYPE_BASE_PARSE,
     GST_DEBUG_CATEGORY_INIT (gst_fddepay_debug_category, "fddepay", 0,
         "debug category for fddepay element"));
 
@@ -91,8 +90,7 @@ gst_fddepay_class_init (GstFddepayClass * klass)
 {
   GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
   GstElementClass *gstelement_class = GST_ELEMENT_CLASS (klass);
-  GstBaseTransformClass *base_transform_class =
-      GST_BASE_TRANSFORM_CLASS (klass);
+  GstBaseParseClass *base_parse_class = GST_BASE_PARSE_CLASS (klass);
 
   /* Setting up pads and setting metadata should be moved to
      base_class_init if you intend to subclass this class. */
@@ -108,11 +106,10 @@ gst_fddepay_class_init (GstFddepayClass * klass)
 
   gobject_class->dispose = gst_fddepay_dispose;
   gstelement_class->set_clock = GST_DEBUG_FUNCPTR (gst_fddepay_set_clock);
-  base_transform_class->transform_caps =
-      GST_DEBUG_FUNCPTR (gst_fddepay_transform_caps);
-  base_transform_class->transform_ip =
-      GST_DEBUG_FUNCPTR (gst_fddepay_transform_ip);
-
+  base_parse_class->set_sink_caps =
+      GST_DEBUG_FUNCPTR (gst_fddepay_set_sink_caps);
+  base_parse_class->handle_frame =
+      GST_DEBUG_FUNCPTR (gst_fddepay_handle_frame);
 }
 
 static void
@@ -124,6 +121,7 @@ gst_fddepay_init (GstFddepay * fddepay)
   fddepay->monotonic_clock = g_object_new (GST_TYPE_SYSTEM_CLOCK,
       "clock-type", GST_CLOCK_TYPE_MONOTONIC, NULL);
   GST_OBJECT_FLAG_SET (fddepay->monotonic_clock, GST_CLOCK_FLAG_CAN_SET_MASTER);
+  gst_base_parse_set_min_frame_size (&fddepay->base_fddepay, sizeof (FDMessage));
 }
 
 void
@@ -157,42 +155,12 @@ depay_caps (GstCapsFeatures * features, GstStructure * structure, gpointer user_
 }
 
 static gboolean
-pay_caps (GstCapsFeatures * features, GstStructure * structure, gpointer user_data)
+gst_fddepay_set_sink_caps (GstBaseParse * parse, GstCaps * caps)
 {
-  gst_structure_set (structure, "payloaded-name", G_TYPE_STRING,
-      gst_structure_get_name (structure), NULL);
-  gst_structure_set_name (structure, "application/x-fd");
-  return TRUE;
-}
-
-static GstCaps *
-gst_fddepay_transform_caps (GstBaseTransform * trans, GstPadDirection direction,
-    GstCaps * caps, GstCaps * filter)
-{
-  GstFddepay *fddepay = GST_FDDEPAY (trans);
-  GstCaps *othercaps;
-
-  GST_DEBUG_OBJECT (fddepay, "transform_caps");
-
-  othercaps = gst_caps_copy (caps);
-  if (direction == GST_PAD_SRC) {
-    /* transform caps going upstream */
-    gst_caps_map_in_place (othercaps, pay_caps, NULL);
-  } else {
-    /* transform caps going downstream */
-    gst_caps_map_in_place (othercaps, depay_caps, NULL);
-  }
-
-  if (filter) {
-    GstCaps *intersect;
-
-    intersect = gst_caps_intersect (othercaps, filter);
-    gst_caps_unref (othercaps);
-
-    return intersect;
-  } else {
-    return othercaps;
-  }
+  GST_WARNING_OBJECT (parse, "set_sink_caps ()");
+  g_autoptr(GstCaps) outcaps = gst_caps_copy (caps);
+  gst_caps_map_in_place (outcaps, depay_caps, parse);
+  return gst_pad_push_event (GST_BASE_PARSE_SRC_PAD (parse), gst_event_new_caps (outcaps));
 }
 
 static gboolean
@@ -222,32 +190,29 @@ gst_fddepay_set_clock (GstElement * element, GstClock * clock)
 }
 
 static GstFlowReturn
-gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
+gst_fddepay_handle_frame (GstBaseParse * parse, GstBaseParseFrame * frame, gint * skipsize)
 {
-  GstFddepay *fddepay = GST_FDDEPAY (trans);
+  GstFddepay *fddepay = GST_FDDEPAY (parse);
   FDMessage msg;
   GstMemory *fdmem = NULL;
+  g_autoptr(GstBuffer) outbuf = NULL;
   GstNetControlMessageMeta * meta;
   GUnixFDList *fds = NULL;
   int fd = -1;
   struct stat statbuf;
   GstClockTime pipeline_clock_time, running_time;
+  gsize consumed_bytes = 0;
 
-  GST_DEBUG_OBJECT (fddepay, "transform_ip");
+  GST_DEBUG_OBJECT (fddepay, "handle_frame");
 
-  if (gst_buffer_get_size (buf) != sizeof (msg)) {
-    /* We're guaranteed that we can't `read` from a socket across an attached
-     * file descriptor so we should get the data in chunks no bigger than
-     * sizeof(FDMessage) */
-    GST_WARNING_OBJECT (fddepay, "fddepay: Received wrong amount of data "
-        "between fds.");
-    goto error;
+  if (gst_buffer_extract (frame->buffer, 0, &msg, sizeof (msg)) < sizeof (msg)) {
+    /* Need more data, this will be called again once more data is available */
+    return GST_FLOW_OK;
   }
 
-  gst_buffer_extract (buf, 0, &msg, sizeof (msg));
-
+  consumed_bytes = sizeof (msg);
   meta = ((GstNetControlMessageMeta*) gst_buffer_get_meta (
-      buf, GST_NET_CONTROL_MESSAGE_META_API_TYPE));
+      frame->buffer, GST_NET_CONTROL_MESSAGE_META_API_TYPE));
 
   if (meta &&
       g_socket_control_message_get_msg_type (meta->message) == SCM_RIGHTS) {
@@ -289,40 +254,40 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
   gst_memory_resize (fdmem, msg.offset, msg.size);
   GST_MINI_OBJECT_FLAG_SET (fdmem, GST_MEMORY_FLAG_READONLY);
 
-  gst_buffer_remove_all_memory (buf);
-  gst_buffer_remove_meta (buf,
-      gst_buffer_get_meta (buf, GST_NET_CONTROL_MESSAGE_META_API_TYPE));
-  gst_buffer_append_memory (buf, fdmem);
+  outbuf = gst_buffer_copy_region (frame->buffer,
+      GST_BUFFER_COPY_FLAGS | GST_BUFFER_COPY_TIMESTAMPS, 0, 0);
+  gst_buffer_append_memory (outbuf, fdmem);
   fdmem = NULL;
 
-  if (trans->segment.format == GST_FORMAT_TIME) {
+  if (parse->segment.format == GST_FORMAT_TIME) {
     GST_OBJECT_LOCK (fddepay->monotonic_clock);
     pipeline_clock_time = gst_clock_adjust_unlocked (fddepay->monotonic_clock,
         msg.capture_timestamp);
     GST_OBJECT_UNLOCK (fddepay->monotonic_clock);
-    if (GST_ELEMENT (trans)->base_time < pipeline_clock_time) {
-      running_time = pipeline_clock_time - GST_ELEMENT (trans)->base_time;
+    if (GST_ELEMENT (parse)->base_time < pipeline_clock_time) {
+      running_time = pipeline_clock_time - GST_ELEMENT (parse)->base_time;
     } else {
-      GST_INFO_OBJECT (trans, "base time < clock time! %" GST_TIME_FORMAT " < "
-          "%" GST_TIME_FORMAT, GST_TIME_ARGS (GST_ELEMENT (trans)->base_time),
+      GST_INFO_OBJECT (parse, "base time < clock time! %" GST_TIME_FORMAT " < "
+          "%" GST_TIME_FORMAT, GST_TIME_ARGS (GST_ELEMENT (parse)->base_time),
           GST_TIME_ARGS (pipeline_clock_time));
       running_time = 0;
     }
-    GST_BUFFER_PTS (buf) = gst_segment_to_position (
-        &trans->segment, GST_FORMAT_TIME, running_time);
+    GST_BUFFER_PTS (outbuf) = gst_segment_to_position (
+        &parse->segment, GST_FORMAT_TIME, running_time);
 
-    GST_DEBUG_OBJECT (trans, "CLOCK_MONOTONIC capture timestamp %"
+    GST_DEBUG_OBJECT (parse, "CLOCK_MONOTONIC capture timestamp %"
         GST_TIME_FORMAT " -> pipeline clock time %" GST_TIME_FORMAT " -> "
         "running time %" GST_TIME_FORMAT " -> PTS %" GST_TIME_FORMAT,
         GST_TIME_ARGS (msg.capture_timestamp),
         GST_TIME_ARGS (pipeline_clock_time), GST_TIME_ARGS (running_time),
-        GST_TIME_ARGS (GST_BUFFER_PTS (buf)));
+        GST_TIME_ARGS (GST_BUFFER_PTS (outbuf)));
 
   } else {
-    GST_INFO_OBJECT (trans, "Can't apply timestamp to buffer: segment.format "
+    GST_INFO_OBJECT (parse, "Can't apply timestamp to buffer: segment.format "
         "!= GST_FORMAT_TIME");
   }
-  return GST_FLOW_OK;
+  frame->out_buffer = g_steal_pointer (&outbuf);
+  return gst_base_parse_finish_frame (parse, frame, consumed_bytes);
 error:
   if (fd >= 0)
     close (fd);
