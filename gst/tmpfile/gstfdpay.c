@@ -68,6 +68,10 @@ GST_DEBUG_CATEGORY_STATIC (gst_fdpay_debug_category);
   } while (0);
 
 
+/* Below this size we copy the data rather than using FD payloading as memory
+ * mapping overhead dominates. */
+const gsize MIN_FD_PAYLOAD_SIZE = 512 * 1024;
+
 /* prototypes */
 
 static void gst_fdpay_dispose (GObject * object);
@@ -372,22 +376,27 @@ gst_fdpay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
 
   GST_DEBUG_OBJECT (fdpay, "transform_ip");
 
-  fdmem = gst_fdpay_get_fd_memory (fdpay, buf);
-  gst_buffer_remove_all_memory (buf);
+  if (gst_buffer_get_size (buf) < MIN_FD_PAYLOAD_SIZE) {
+    msg.size = gst_buffer_get_size (buf);
+    msg.offset = -1;
+  } else {
+    fdmem = gst_fdpay_get_fd_memory (fdpay, buf);
+    gst_buffer_remove_all_memory (buf);
 
-  msg.size = fdmem->size;
-  msg.offset = fdmem->offset;
+    msg.size = fdmem->size;
+    msg.offset = fdmem->offset;
 
-  fdmsg = g_unix_fd_message_new ();
-  if (!g_unix_fd_message_append_fd ((GUnixFDMessage*) fdmsg,
-          gst_fd_memory_get_fd (fdmem), &err)) {
-    goto append_fd_failed;
+    fdmsg = g_unix_fd_message_new ();
+    if (!g_unix_fd_message_append_fd ((GUnixFDMessage*) fdmsg,
+            gst_fd_memory_get_fd (fdmem), &err)) {
+      goto append_fd_failed;
+    }
+    gst_memory_unref(fdmem);
+    fdmem = NULL;
+
+    gst_buffer_add_net_control_message_meta (buf, fdmsg);
+    g_clear_object (&fdmsg);
   }
-  gst_memory_unref(fdmem);
-  fdmem = NULL;
-
-  gst_buffer_add_net_control_message_meta (buf, fdmsg);
-  g_clear_object (&fdmsg);
 
   gst_base_transform_get_allocator (trans, &downstream_allocator, NULL);
   msgmem = gst_allocator_alloc (downstream_allocator, sizeof (FDMessage), NULL);
@@ -409,7 +418,7 @@ gst_fdpay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
   gst_memory_unmap (msgmem, &info);
   GST_UNREF (downstream_allocator);
 
-  gst_buffer_append_memory (buf, msgmem);
+  gst_buffer_prepend_memory (buf, msgmem);
   msgmem = NULL;
 
   static struct FaultInjectionPoint fdpay_buffer = FAULT_INJECTION_POINT("fdpay_buffer");

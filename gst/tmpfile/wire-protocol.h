@@ -29,7 +29,7 @@ typedef struct {
   /* Time at which the frame was originally captured against the CLOCK_MONOTONIC
    * in ns */
   uint64_t capture_timestamp;
-  uint64_t offset;
+  int64_t offset;
   uint64_t size;
 } FDMessage;
 

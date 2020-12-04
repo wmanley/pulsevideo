@@ -210,54 +210,67 @@ gst_fddepay_handle_frame (GstBaseParse * parse, GstBaseParseFrame * frame, gint 
     return GST_FLOW_OK;
   }
 
-  consumed_bytes = sizeof (msg);
-  meta = ((GstNetControlMessageMeta*) gst_buffer_get_meta (
-      frame->buffer, GST_NET_CONTROL_MESSAGE_META_API_TYPE));
+  if (msg.offset == -1) {
+    /* No FD payloading, the data is inline */
+    if (gst_buffer_get_size (frame->buffer) < msg.size + sizeof (msg)) {
+      /* Need more data */
+      gst_base_parse_set_min_frame_size (parse, msg.size + sizeof (msg));
+      return GST_FLOW_OK;
+    }
+    outbuf = gst_buffer_copy_region (frame->buffer, GST_BUFFER_COPY_ALL,
+                                     sizeof (msg), msg.size);
+    gst_base_parse_set_min_frame_size (parse, sizeof (msg));
+    consumed_bytes = msg.size + sizeof (msg);
+  } else {
+    consumed_bytes = sizeof (msg);
+    meta = ((GstNetControlMessageMeta*) gst_buffer_get_meta (
+        frame->buffer, GST_NET_CONTROL_MESSAGE_META_API_TYPE));
 
-  if (meta &&
-      g_socket_control_message_get_msg_type (meta->message) == SCM_RIGHTS) {
-    fds = g_unix_fd_message_get_fd_list ((GUnixFDMessage*) meta->message);
-    meta = NULL;
+    if (meta &&
+        g_socket_control_message_get_msg_type (meta->message) == SCM_RIGHTS) {
+      fds = g_unix_fd_message_get_fd_list ((GUnixFDMessage*) meta->message);
+      meta = NULL;
+    }
+
+    if (g_unix_fd_list_get_length (fds) != 1) {
+      GST_WARNING_OBJECT (fddepay, "fddepay: Expect to receive 1 FD for each "
+          "buffer, received %i", g_unix_fd_list_get_length (fds));
+      goto error;
+    }
+
+    fd = g_unix_fd_list_get (fds, 0, NULL);
+    fds = NULL;
+
+    if (fd == -1) {
+      GST_WARNING_OBJECT (fddepay, "fddepay: Could not get FD from buffer's "
+          "GUnixFDList");
+      goto error;
+    }
+
+    if (G_UNLIKELY (fstat (fd, &statbuf) != 0)) {
+      GST_WARNING_OBJECT (fddepay, "fddepay: Could not stat received fd %i: %s",
+          fd, strerror(errno));
+      goto error;
+    }
+    if (G_UNLIKELY (statbuf.st_size < msg.offset + msg.size)) {
+      /* Note: This is for sanity and debugging rather than security.  To be
+         secure we'd first need to check that it was a sealed memfd. */
+      GST_WARNING_OBJECT (fddepay, "fddepay: Received fd %i is too small to "
+          "contain data (%zi < %" G_GUINT64_FORMAT " + %" G_GUINT64_FORMAT ")",
+          fd, (ssize_t) statbuf.st_size, msg.offset, msg.size);
+      goto error;
+    }
+    fdmem = gst_fd_allocator_alloc (fddepay->fd_allocator, fd,
+        msg.offset + msg.size, GST_FD_MEMORY_FLAG_NONE);
+    fd = -1;
+    gst_memory_resize (fdmem, msg.offset, msg.size);
+    GST_MINI_OBJECT_FLAG_SET (fdmem, GST_MEMORY_FLAG_READONLY);
+
+    outbuf = gst_buffer_copy_region (frame->buffer,
+        GST_BUFFER_COPY_FLAGS | GST_BUFFER_COPY_TIMESTAMPS, 0, 0);
+    gst_buffer_append_memory (outbuf, fdmem);
+    fdmem = NULL;
   }
-
-  if (g_unix_fd_list_get_length (fds) != 1) {
-    GST_WARNING_OBJECT (fddepay, "fddepay: Expect to receive 1 FD for each "
-        "buffer, received %i", g_unix_fd_list_get_length (fds));
-    goto error;
-  }
-
-  fd = g_unix_fd_list_get (fds, 0, NULL);
-  fds = NULL;
-
-  if (fd == -1) {
-    GST_WARNING_OBJECT (fddepay, "fddepay: Could not get FD from buffer's "
-        "GUnixFDList");
-    goto error;
-  }
-
-  if (G_UNLIKELY (fstat (fd, &statbuf) != 0)) {
-    GST_WARNING_OBJECT (fddepay, "fddepay: Could not stat received fd %i: %s",
-        fd, strerror(errno));
-    goto error;
-  }
-  if (G_UNLIKELY (statbuf.st_size < msg.offset + msg.size)) {
-    /* Note: This is for sanity and debugging rather than security.  To be
-       secure we'd first need to check that it was a sealed memfd. */
-    GST_WARNING_OBJECT (fddepay, "fddepay: Received fd %i is too small to "
-        "contain data (%zi < %" G_GUINT64_FORMAT " + %" G_GUINT64_FORMAT ")",
-        fd, (ssize_t) statbuf.st_size, msg.offset, msg.size);
-    goto error;
-  }
-  fdmem = gst_fd_allocator_alloc (fddepay->fd_allocator, fd,
-      msg.offset + msg.size, GST_FD_MEMORY_FLAG_NONE);
-  fd = -1;
-  gst_memory_resize (fdmem, msg.offset, msg.size);
-  GST_MINI_OBJECT_FLAG_SET (fdmem, GST_MEMORY_FLAG_READONLY);
-
-  outbuf = gst_buffer_copy_region (frame->buffer,
-      GST_BUFFER_COPY_FLAGS | GST_BUFFER_COPY_TIMESTAMPS, 0, 0);
-  gst_buffer_append_memory (outbuf, fdmem);
-  fdmem = NULL;
 
   if (parse->segment.format == GST_FORMAT_TIME) {
     GST_OBJECT_LOCK (fddepay->monotonic_clock);
