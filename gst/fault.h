@@ -35,6 +35,8 @@
 
 #include <glib.h>
 #include <err.h>
+#include <stdlib.h>
+#include <string.h>
 
 #ifdef ENABLE_FAULT_INJECTION
 static const gboolean FAULT_INJECTION = 1;
