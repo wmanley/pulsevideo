@@ -31,6 +31,7 @@
  * </refsect2>
  */
 
+#include "fault.h"
 #include "glib_compat.h"
 #include "gstpulsevideosink.h"
 #include <string.h>
@@ -362,11 +363,15 @@ on_handle_attach (GstVideoSource2         *interface,
   g_assert (inpad);
   caps = gst_pad_get_current_caps (inpad);
   /* We will always have caps at this point because we don't register the dbus
-   * callback untile the child elements are at least in state PAUSED, so should
+   * callback until the child elements are at least in state PAUSED, so should
    * have completed caps negotiation */
   if (!caps)
     goto out;
   caps_str = gst_caps_to_string (caps);
+
+  static struct FaultInjectionPoint pre_attach = FAULT_INJECTION_POINT("pre_attach");
+  if (!inject_fault (&pre_attach, &gerror))
+    goto out;
 
   gst_video_source2_complete_attach (
       g_steal_pointer(&interface), invocation, their_socket_list,

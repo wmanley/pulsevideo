@@ -21,7 +21,7 @@ jobs:
         libgstreamer-plugins-base1.0-dev
         valac
     - name: make
-      run: make
+      run: make CFLAGS=-DENABLE_FAULT_INJECTION=1
     - name: apt install for tests
       run: sudo apt-get install -y
         dbus

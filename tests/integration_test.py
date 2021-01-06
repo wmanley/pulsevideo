@@ -9,6 +9,7 @@ import threading
 import time
 from collections import namedtuple
 from contextlib import contextmanager
+from textwrap import dedent
 
 import dbus
 import pytest
@@ -41,23 +42,29 @@ def pulsevideo_cmdline(source_pipeline=None):
 TestCtx = namedtuple('TestCtx', 'bus pulsevideod')
 
 
-@pytest.yield_fixture(scope='function')
+@contextmanager
 def pulsevideo_via_activation(tmpdir):
     mkdir_p('%s/services' % tmpdir)
+
+    with open('%s/pulsevideo' % tmpdir, 'w') as f:
+        f.write(
+            "#!/bin/sh -ex\n"
+            "exec %s\n" % (shquote(pulsevideo_cmdline())))
+        os.fchmod(f.fileno(), 0o755)
 
     with open('%s/services/com.stbtester.VideoSource.test.service' % tmpdir,
               'w') as out, \
             open('%s/com.stbtester.VideoSource.test.service.in'
                  % os.path.dirname(__file__)) as in_:
-        out.write(
-            in_.read()
-            .replace('@PULSEVIDEO@',
-                     ' '.join(pipes.quote(x) for x in pulsevideo_cmdline()))
-            .replace('@TMPDIR@', tmpdir))
+        out.write(in_.read().replace('@TMPDIR@', tmpdir))
 
     with dbus_ctx(tmpdir) as (_, bus_address):
         import dbus
         yield TestCtx(dbus.bus.BusConnection(bus_address), None)
+
+
+def shquote(l):
+    return ' '.join(pipes.quote(x) for x in l)
 
 
 @contextmanager
@@ -155,17 +162,18 @@ class FrameCounter(object):
             self.count = bytes_read // self.frame_size
 
 
-def test_with_dbus(pulsevideo_via_activation):
-    os.environ['GST_DEBUG'] = "3,*videosource*:9"
-    gst_launch = subprocess.Popen(
-        ['gst-launch-1.0', 'pulsevideosrc',
-         'bus-name=com.stbtester.VideoSource.test', '!', 'fdsink'],
-        stdout=subprocess.PIPE)
-    fc = FrameCounter(gst_launch.stdout)
-    fc.start()
-    time.sleep(1)
-    count = fc.count
-    assert count >= 5 and count <= 15
+def test_with_dbus(tmpdir):
+    with pulsevideo_via_activation(tmpdir):
+        os.environ['GST_DEBUG'] = "3,*videosource*:9"
+        gst_launch = subprocess.Popen(
+            ['gst-launch-1.0', 'pulsevideosrc',
+             'bus-name=com.stbtester.VideoSource.test', '!', 'fdsink'],
+            stdout=subprocess.PIPE)
+        fc = FrameCounter(gst_launch.stdout)
+        fc.start()
+        time.sleep(1)
+        count = fc.count
+        assert count >= 5 and count <= 15
 
 
 def wait_until(f, timeout_secs=10):
@@ -178,26 +186,54 @@ def wait_until(f, timeout_secs=10):
             return val  # falsy
 
 
-def test_that_pulsevideosrc_recovers_if_pulsevideo_crashes(
-        pulsevideo_via_activation):
-    os.environ['GST_DEBUG'] = "3,*videosource*:9"
-    gst_launch = subprocess.Popen(
-        ['gst-launch-1.0', '-e', '-q', 'pulsevideosrc',
-         'bus-name=com.stbtester.VideoSource.test', '!', 'fdsink'],
-        stdout=subprocess.PIPE)
-    fc = FrameCounter(gst_launch.stdout)
-    fc.start()
-    assert wait_until(lambda: fc.count > 1)
-    bus = pulsevideo_via_activation.bus
-    obj = bus.get_object('org.freedesktop.DBus', '/')
-    pulsevideo_pid = obj.GetConnectionUnixProcessID(
-        'com.stbtester.VideoSource.test')
-    os.kill(pulsevideo_pid, 9)
-    oldcount = fc.count
-    assert wait_until(lambda: fc.count > oldcount + 20, 3)
+def test_that_pulsevideosrc_recovers_if_pulsevideo_crashes(tmpdir, capfdbinary):
+    with pulsevideo_via_activation(tmpdir):
+        cmd = shquote(pulsevideo_cmdline())
+        with open("%s/pulsevideo" % tmpdir, 'w') as f:
+            f.write(dedent("""\
+                #!/bin/bash -ex
 
-    gst_launch.kill()
-    gst_launch.wait()
+                progress=$(cat {tmpdir}/progress || echo 0)
+                echo $((progress + 1)) >{tmpdir}/progress
+                case $progress in
+                0)
+                    # Simulate crash before grabbing bus name
+                    exit 1
+                ;;
+                1)
+                    # Simulate crash during DBus "Attach" call
+                    export pre_attach=abort
+                ;;
+                2)
+                    # Should trigger the watchdog
+                    export fdpay_buffer="skip skip skip skip usleep=10000000"
+                ;;
+                3)
+                    # Streaming error on 3rd buffer, should exit and be restarted
+                    export fdpay_buffer="skip skip gerror"
+                ;;
+                esac
+                exec {cmd}
+                """.format(tmpdir=tmpdir, cmd=cmd)))
+
+        os.environ['GST_DEBUG'] = "3,*videosource*:9"
+        gst_launch = subprocess.Popen(
+            ['gst-launch-1.0', '-e', '-q', 'pulsevideosrc',
+             'bus-name=com.stbtester.VideoSource.test', '!', 'fdsink'],
+            stdout=subprocess.PIPE)
+        fc = FrameCounter(gst_launch.stdout)
+        fc.start()
+        assert wait_until(lambda: fc.count > 20, 20)
+
+        gst_launch.kill()
+        gst_launch.wait()
+
+        # Make sure each of our failure scenarios actually happened:
+        stderr = "".join(capfdbinary.readouterr().err)
+        assert "Activated service 'com.stbtester.VideoSource.test' failed" in stderr
+        assert "Aborted" in stderr
+        assert "Error: Watchdog triggered" in stderr
+        assert "Error: Internal data stream error." in stderr
 
 
 def test_that_pulsevideosrc_fails_if_pulsevideo_is_not_available(

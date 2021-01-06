@@ -205,6 +205,7 @@ build/%.h : gst/%.h Makefile | build/debugutils build/tcp build/tmpfile build/gs
 	      >$@
 
 build/libgstpulsevideo.so : \
+		build/fault.h \
 		build/glib_compat.h \
 		build/gst-plugins-base/gst-libs/gst/allocators/gstfdmemory.h \
 		build/gst-plugins-base/gst-libs/gst/allocators/gstfdmemory.c \
