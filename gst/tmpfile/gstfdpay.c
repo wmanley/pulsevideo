@@ -41,6 +41,7 @@
 #endif
 
 #include "wire-protocol.h"
+#include "../fault.h"
 
 #include <gst/gst.h>
 #include <gst/allocators/gstfdmemory.h>
@@ -403,6 +404,11 @@ gst_fdpay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
 
   gst_buffer_append_memory (buf, msgmem);
   msgmem = NULL;
+
+  static struct FaultInjectionPoint fdpay_buffer = FAULT_INJECTION_POINT("fdpay_buffer");
+  if (!inject_fault (&fdpay_buffer, NULL)) {
+    return GST_FLOW_ERROR;
+  }
 
   GST_DEBUG_OBJECT (trans, "transform_ip: Pushing {"
       "capture_timestamp: %" G_GUINT64_FORMAT ", "
