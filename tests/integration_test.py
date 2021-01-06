@@ -67,8 +67,8 @@ def pulsevideo_ctx(dir_, source_pipeline=None):
         sbus = dbus.bus.BusConnection(bus_address)
         bus = sbus.get_object('org.freedesktop.DBus', '/')
         assert dbus_daemon.poll() is None
-        wait_until(
-            lambda: 'com.stbtester.VideoSource.capture' in bus.ListNames())
+        assert wait_until(
+            lambda: 'com.stbtester.VideoSource.test' in bus.ListNames())
         yield TestCtx(sbus, pulsevideod)
         pulsevideod.kill()
         pulsevideod.wait()
