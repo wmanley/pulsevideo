@@ -197,6 +197,18 @@ def test_that_pulsevideosrc_recovers_if_pulsevideo_crashes(tmpdir, capfdbinary):
                 echo $((progress + 1)) >{tmpdir}/progress
                 case $progress in
                 0)
+                    # Simulate crash before grabbing bus name
+                    exit 1
+                ;;
+                1)
+                    # Simulate crash during DBus "Attach" call
+                    export pre_attach=abort
+                ;;
+                2)
+                    # Should trigger the watchdog
+                    export fdpay_buffer="skip skip skip skip usleep=10000000"
+                ;;
+                3)
                     # Streaming error on 3rd buffer, should exit and be restarted
                     export fdpay_buffer="skip skip gerror"
                 ;;
@@ -218,6 +230,9 @@ def test_that_pulsevideosrc_recovers_if_pulsevideo_crashes(tmpdir, capfdbinary):
 
         # Make sure each of our failure scenarios actually happened:
         stderr = "".join(capfdbinary.readouterr().err)
+        assert "Activated service 'com.stbtester.VideoSource.test' failed" in stderr
+        assert "Aborted" in stderr
+        assert "Error: Watchdog triggered" in stderr
         assert "Error: Internal data stream error." in stderr
 
 

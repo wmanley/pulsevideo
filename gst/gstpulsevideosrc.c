@@ -298,6 +298,20 @@ failure:
   }
 }
 
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(GstVideoSource2, g_object_unref);
+
+static gboolean
+is_dbus_error_recoverable(GError * err)
+{
+  /* These errors are associated with the remote pulsevideo crashing, in which
+   * case we can try and reconnect.  We don't want to reconnect unconditionally
+   * as this can just make things worse (e.g. resource starvation) */
+  return g_error_matches (err, G_DBUS_ERROR, G_DBUS_ERROR_NO_REPLY) ||
+    g_error_matches (err, G_DBUS_ERROR, G_DBUS_ERROR_SPAWN_CHILD_EXITED) ||
+    g_error_matches (err, G_DBUS_ERROR, G_DBUS_ERROR_SPAWN_CHILD_SIGNALED) ||
+    g_error_matches (err, G_DBUS_ERROR, G_DBUS_ERROR_TIMED_OUT);
+}
+
 static PvInitResult
 gst_pulsevideo_src_reinit (GstPulseVideoSrc * src, GError **error)
 {
@@ -306,7 +320,6 @@ gst_pulsevideo_src_reinit (GstPulseVideoSrc * src, GError **error)
   gchar *object_path = NULL;
   GError *err = NULL;
 
-  GstVideoSource2 *videosource = NULL;
   gboolean ret = PV_INIT_FAILURE;
   gchar *scaps = NULL;
   GstCaps *caps = NULL;
@@ -330,18 +343,37 @@ gst_pulsevideo_src_reinit (GstPulseVideoSrc * src, GError **error)
     }
   }
 
-  videosource = gst_video_source2_proxy_new_sync (dbus,
-      G_DBUS_PROXY_FLAGS_NONE, bus_name, object_path, src->cancellable, &err);
-  if (!videosource) {
-    GST_ELEMENT_ERROR (src, RESOURCE, NOT_FOUND, (NULL),
-        ("Could not create VideoSource DBus proxy: %s", err->message));
-    goto done;
-  }
+  while (1) {
+    if (err) {
+      g_autofree gchar* msg = g_dbus_error_get_remote_error (err);
+      GST_WARNING_OBJECT (src, "Attach failed with error %s.  Retrying", msg);
+      g_clear_error (&err);
+    }
 
-  if (!gst_video_source2_call_attach_sync (videosource, NULL, NULL, &scaps,
-          &fdlist, src->cancellable, &err)) {
-    ret = PV_INIT_NOOBJECT;
-    goto done;
+    g_autoptr(GstVideoSource2) videosource = NULL;
+
+    videosource = gst_video_source2_proxy_new_sync (dbus,
+        G_DBUS_PROXY_FLAGS_NONE, bus_name, object_path, src->cancellable, &err);
+    if (!videosource) {
+      if (is_dbus_error_recoverable (err))
+        /* Retry */
+        continue;
+      GST_ELEMENT_ERROR (src, RESOURCE, NOT_FOUND, (NULL),
+          ("Could not create VideoSource DBus proxy: %s", err->message));
+      goto done;
+    }
+
+    if (!gst_video_source2_call_attach_sync (videosource, NULL, NULL, &scaps,
+            &fdlist, src->cancellable, &err)) {
+      if (is_dbus_error_recoverable (err))
+        /* Retry */
+        continue;
+
+      ret = PV_INIT_NOOBJECT;
+      goto done;
+    }
+
+    break;
   }
 
   g_assert (scaps);
@@ -354,7 +386,7 @@ gst_pulsevideo_src_reinit (GstPulseVideoSrc * src, GError **error)
   fds = g_unix_fd_list_steal_fds (fdlist, NULL);
   socket = g_socket_new_from_fd (fds[0], &err);
   if (!socket) {
-    GST_ELEMENT_ERROR (videosource, RESOURCE, FAILED,
+    GST_ELEMENT_ERROR (src, RESOURCE, FAILED,
         (NULL), ("Failed to create socket: %s", err->message));
     goto done;
   }
@@ -365,7 +397,6 @@ gst_pulsevideo_src_reinit (GstPulseVideoSrc * src, GError **error)
 
 done:
   g_clear_object (&dbus);
-  g_clear_object (&videosource);
   g_clear_object (&fdlist);
   g_clear_object (&socket);
 
