@@ -363,7 +363,7 @@ on_handle_attach (GstVideoSource2         *interface,
   g_assert (inpad);
   caps = gst_pad_get_current_caps (inpad);
   /* We will always have caps at this point because we don't register the dbus
-   * callback untile the child elements are at least in state PAUSED, so should
+   * callback until the child elements are at least in state PAUSED, so should
    * have completed caps negotiation */
   if (!caps)
     goto out;
