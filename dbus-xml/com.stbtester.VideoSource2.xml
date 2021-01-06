@@ -5,6 +5,7 @@
     <method name="Attach">
       <arg name="socket" type="h" direction="out"/>
       <annotation name="org.gtk.GDBus.C.UnixFD" value="True" />
+      <arg name="caps" type="s" direction="out"/>
     </method>
     <property name="Caps" type="s" access="read"/>
   </interface>
