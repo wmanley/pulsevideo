@@ -53,10 +53,10 @@ GType gst_tmpfile_allocator_get_type (void);
 G_DEFINE_TYPE (GstTmpFileAllocator, gst_tmpfile_allocator, GST_TYPE_ALLOCATOR);
 
 static int
-tmpfile_create (GstTmpFileAllocator * allocator, gsize size)
+tmpfile_create (GstTmpFileAllocator * allocator)
 {
   char filename[] = "/dev/shm/gsttmpfilepay.PPPPP.NNNNNNNNNN.XXXXXX";
-  int fd, result;
+  int fd;
 
   /* This should not be strictly necessary, but it can be useful to know more
      about where an fd came from when looking in /proc/<PID>/fd/ */
@@ -71,14 +71,6 @@ tmpfile_create (GstTmpFileAllocator * allocator, gsize size)
     return -1;
   }
   unlink (filename);
-
-  result = fallocate (fd, 0, 0, size);
-  if (result == -1) {
-    GST_WARNING_OBJECT (allocator, "Failed to resize temporary file: %s",
-        strerror (errno));
-    close (fd);
-    return -1;
-  }
 
   return fd;
 }
@@ -107,6 +99,40 @@ gst_tmpfile_allocator_new (void)
   return (GstAllocator *) obj;
 }
 
+GstMemory *
+gst_tmpfile_allocator_copy_alloc (GstAllocator * allocator,
+    const void * data, size_t n)
+{
+  GstTmpFileAllocator *alloc = (GstTmpFileAllocator *) allocator;
+
+  GstMemory * mem = NULL;
+
+  int fd = tmpfile_create (alloc);
+  if (fd == -1)
+    goto out;
+
+  size_t off = 0;
+  while (off < n) {
+    ssize_t w = write(fd, data + off, n - off);
+    if (w < 0) {
+      if (errno == EINTR)
+        continue;
+      else
+        goto out;
+    } else {
+      off += w;
+    }
+  }
+
+  mem = gst_fd_allocator_alloc (alloc->fd_allocator, fd, n,
+      GST_FD_MEMORY_FLAG_KEEP_MAPPED);
+  fd = -1;
+out:
+  if (fd > 0)
+    close (fd);
+  return mem;
+}
+
 inline static gsize
 pad (gsize off, gsize align)
 {
@@ -118,7 +144,7 @@ gst_tmpfile_allocator_alloc (GstAllocator * allocator, gsize size,
     GstAllocationParams * params)
 {
   GstTmpFileAllocator *alloc = (GstTmpFileAllocator *) allocator;
-  GstMemory *mem;
+  GstMemory *mem = NULL;
   int fd;
   gsize maxsize;
 
@@ -134,12 +160,24 @@ gst_tmpfile_allocator_alloc (GstAllocator * allocator, gsize size,
   if (alloc->fd_allocator == NULL)
     return NULL;
 
-  fd = tmpfile_create (alloc, maxsize);
+  fd = tmpfile_create (alloc);
   if (fd < 0)
     return NULL;
+
+  int result = fallocate (fd, 0, 0, maxsize);
+  if (result == -1) {
+    GST_WARNING_OBJECT (allocator, "Failed to resize temporary file: %s",
+        strerror (errno));
+    goto out;
+  }
+
   mem = gst_fd_allocator_alloc (alloc->fd_allocator, fd, maxsize,
       GST_FD_MEMORY_FLAG_KEEP_MAPPED);
+  fd = -1;
   gst_memory_resize (mem, pad (params->prefix, params->align), size);
+out:
+  if (fd != 0)
+    close (fd);
   return mem;
 }
 
