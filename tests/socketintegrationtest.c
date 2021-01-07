@@ -334,7 +334,7 @@ GST_START_TEST (test_that_zerocopy_doesnt_leak_fds)
 GST_END_TEST
 
 static void
-on_socket_eos (GstElement *socketsrc, gpointer user_data)
+on_socket_eos (GstElement *socketsrc, GCancellable *cancellable, gpointer user_data)
 {
   GSocket * socket = (GSocket*) user_data;
 

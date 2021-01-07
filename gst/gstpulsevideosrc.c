@@ -69,7 +69,6 @@ G_DEFINE_TYPE (GstPulseVideoSrc, gst_pulsevideo_src, GST_TYPE_BIN);
 
 static void gst_pulsevideo_src_finalize (GObject * gobject);
 
-static gboolean gst_pulsevideo_src_stop (GstPulseVideoSrc * bsrc);
 static gboolean gst_pulsevideo_src_start (GstPulseVideoSrc * bsrc);
 
 static void gst_pulsevideo_src_set_property (GObject * object, guint prop_id,
@@ -77,9 +76,10 @@ static void gst_pulsevideo_src_set_property (GObject * object, guint prop_id,
 static void gst_pulsevideo_src_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec);
 static PvInitResult gst_pulsevideo_src_reinit (
-    GstPulseVideoSrc * src, GError **error);
+    GstPulseVideoSrc * src, GCancellable *cancellable, GError **error);
 
-static void on_socket_eos (GstElement *socketsrc, gpointer user_data);
+static void on_socket_eos (GstElement *socketsrc, GCancellable *cancellable,
+    gpointer user_data);
 static GstStateChangeReturn gst_pulsevideo_src_change_state (
     GstElement * element, GstStateChange transition);
 
@@ -123,13 +123,15 @@ gst_pulsevideo_src_class_init (GstPulseVideoSrcClass * klass)
 }
 
 static void
-on_socket_eos (GstElement *socketsrc, gpointer user_data)
+on_socket_eos (GstElement *socketsrc,
+               GCancellable *cancellable,
+               gpointer user_data)
 {
   GstPulseVideoSrc *src = (GstPulseVideoSrc *) user_data;
 
   GST_INFO_OBJECT (src, "VideoSource has gone away, retrying connection");
 
-  switch (gst_pulsevideo_src_reinit (src, NULL)) {
+  switch (gst_pulsevideo_src_reinit (src, cancellable, NULL)) {
   case PV_INIT_SUCCESS:
     GST_INFO_OBJECT (src, "Successfully reconnected");
     break;
@@ -148,7 +150,6 @@ gst_pulsevideo_src_init (GstPulseVideoSrc * this)
   GstPad *internal_pad, *external_pad;
   GstElement *rawvideovalidate = NULL;
 
-  this->cancellable = g_cancellable_new ();
   this->socketsrc = gst_element_factory_make ("pvsocketsrc", NULL);
   gst_base_src_set_live (GST_BASE_SRC (this->socketsrc), TRUE);
   gst_base_src_set_format (GST_BASE_SRC (this->socketsrc), GST_FORMAT_TIME);
@@ -177,12 +178,13 @@ gst_pulsevideo_src_finalize (GObject * gobject)
 {
   GstPulseVideoSrc *this = GST_PULSEVIDEO_SRC (gobject);
 
+  g_signal_handlers_disconnect_by_func (this->socketsrc,
+      G_CALLBACK (on_socket_eos), gobject);
+
   g_free (this->bus_name);
   this->bus_name = NULL;
   g_free (this->object_path);
-  g_clear_object (&this->cancellable);
   g_clear_object (&this->dbus);
-  g_clear_object (&this->videosource);
   g_clear_object (&this->socketsrc);
   g_clear_object (&this->fddepay);
   g_clear_object (&this->capsfilter);
@@ -279,13 +281,13 @@ gst_pulsevideo_src_change_state (GstElement * element,
     }
   }
 
-  if ((result = GST_ELEMENT_CLASS (parent_class)->change_state (element,
-              transition)) == GST_STATE_CHANGE_FAILURE)
-    goto failure;
+  /* This will cause our child elements to change state too. */
+  result = GST_ELEMENT_CLASS (parent_class)->change_state (element, transition);
+  if (result == GST_STATE_CHANGE_FAILURE)
+    GST_DEBUG_OBJECT (src, "parent failed state change");
 
   if (transition == GST_STATE_CHANGE_PAUSED_TO_READY) {
-    g_cancellable_cancel (src->cancellable);
-    gst_pulsevideo_src_stop ((GstPulseVideoSrc *)element);
+    g_object_set (src->socketsrc, "socket", NULL, NULL);
   }
 
   return result;
@@ -313,7 +315,8 @@ is_dbus_error_recoverable(GError * err)
 }
 
 static PvInitResult
-gst_pulsevideo_src_reinit (GstPulseVideoSrc * src, GError **error)
+gst_pulsevideo_src_reinit (GstPulseVideoSrc * src, GCancellable* cancellable,
+    GError **error)
 {
   GDBusConnection *dbus = NULL;
   gchar *bus_name = NULL;
@@ -326,7 +329,7 @@ gst_pulsevideo_src_reinit (GstPulseVideoSrc * src, GError **error)
   GUnixFDList *fdlist = NULL;
   gint *fds = NULL;
   GSocket *socket = NULL;
-  
+
   GST_OBJECT_LOCK (src);
   if (src->dbus)
     dbus = g_object_ref (src->dbus);
@@ -334,8 +337,13 @@ gst_pulsevideo_src_reinit (GstPulseVideoSrc * src, GError **error)
   object_path = g_strdup (src->object_path);
   GST_OBJECT_UNLOCK (src);
 
+  if (g_cancellable_set_error_if_cancelled (cancellable, error)) {
+    ret = PV_INIT_NOOBJECT;
+    goto done;
+  }
+
   if (!dbus) {
-    dbus = g_bus_get_sync (G_BUS_TYPE_SESSION, src->cancellable, &err);
+    dbus = g_bus_get_sync (G_BUS_TYPE_SESSION, cancellable, &err);
     if (!dbus) {
       GST_ELEMENT_ERROR (src, RESOURCE, NOT_FOUND, (NULL),
           ("Failed connecting to DBus: %s", err->message));
@@ -351,9 +359,8 @@ gst_pulsevideo_src_reinit (GstPulseVideoSrc * src, GError **error)
     }
 
     g_autoptr(GstVideoSource2) videosource = NULL;
-
     videosource = gst_video_source2_proxy_new_sync (dbus,
-        G_DBUS_PROXY_FLAGS_NONE, bus_name, object_path, src->cancellable, &err);
+        G_DBUS_PROXY_FLAGS_NONE, bus_name, object_path, cancellable, &err);
     if (!videosource) {
       if (is_dbus_error_recoverable (err))
         /* Retry */
@@ -364,7 +371,7 @@ gst_pulsevideo_src_reinit (GstPulseVideoSrc * src, GError **error)
     }
 
     if (!gst_video_source2_call_attach_sync (videosource, NULL, NULL, &scaps,
-            &fdlist, src->cancellable, &err)) {
+            &fdlist, cancellable, &err)) {
       if (is_dbus_error_recoverable (err))
         /* Retry */
         continue;
@@ -417,7 +424,7 @@ gst_pulsevideo_src_start (GstPulseVideoSrc * src)
   GError *error = NULL;
   gboolean ret = FALSE;
 
-  switch (gst_pulsevideo_src_reinit (src, &error)) {
+  switch (gst_pulsevideo_src_reinit (src, NULL, &error)) {
   case PV_INIT_SUCCESS:
     ret = TRUE;
     break;
@@ -436,20 +443,4 @@ gst_pulsevideo_src_start (GstPulseVideoSrc * src)
   }
 
   return ret;
-}
-
-static gboolean
-gst_pulsevideo_src_stop (GstPulseVideoSrc * bsrc)
-{
-  GstPulseVideoSrc *src = GST_PULSEVIDEO_SRC (bsrc);
-
-  GDBusProxy *videosource = NULL;
-
-  GST_OBJECT_LOCK (src);
-  SWAP (videosource, src->videosource);
-  GST_OBJECT_UNLOCK (src);
-
-  g_clear_object (&videosource);
-
-  return TRUE;
 }
