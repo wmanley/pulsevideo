@@ -33,7 +33,7 @@ def pulsevideo_cmdline(source_pipeline=None):
     return ['/usr/bin/env',
             'GST_PLUGIN_PATH=%s/../build' % os.path.dirname(__file__),
             'LD_LIBRARY_PATH=%s/../build/' % os.path.dirname(__file__),
-            'G_DEBUG=fatal_warnings',
+            'G_DEBUG=fatal-warnings',
             '%s/../pulsevideo' % os.path.dirname(__file__),
             '--caps=video/x-raw,format=RGB,width=320,height=240,framerate=10/1',
             '--source-pipeline=%s' % source_pipeline,
