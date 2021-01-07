@@ -128,18 +128,21 @@ on_socket_eos (GstElement *socketsrc,
                gpointer user_data)
 {
   GstPulseVideoSrc *src = (GstPulseVideoSrc *) user_data;
+  g_autoptr(GError) err = NULL;
 
   GST_INFO_OBJECT (src, "VideoSource has gone away, retrying connection");
 
-  switch (gst_pulsevideo_src_reinit (src, cancellable, NULL)) {
+  switch (gst_pulsevideo_src_reinit (src, cancellable, &err)) {
   case PV_INIT_SUCCESS:
     GST_INFO_OBJECT (src, "Successfully reconnected");
     break;
   case PV_INIT_NOOBJECT:
-    GST_INFO_OBJECT (src, "Videosource has gone away for good, EOS");
+    GST_INFO_OBJECT (src, "Videosource has gone away for good, EOS: %s",
+        err ? err->message : NULL);
     break;
   case PV_INIT_FAILURE:
-    GST_WARNING_OBJECT (src, "Error reconnecting to Videosource");
+    GST_WARNING_OBJECT (src, "Error reconnecting to Videosource: %s",
+        err ? err->message : NULL);
     break;
   }
 }
@@ -375,6 +378,9 @@ gst_pulsevideo_src_reinit (GstPulseVideoSrc * src, GCancellable* cancellable,
       if (is_dbus_error_recoverable (err))
         /* Retry */
         continue;
+
+      GST_ELEMENT_WARNING (src, RESOURCE, NOT_FOUND, (NULL),
+          ("VideoSource2.Attach failed: %s", err->message));
 
       ret = PV_INIT_NOOBJECT;
       goto done;
