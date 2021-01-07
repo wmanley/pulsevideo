@@ -138,7 +138,7 @@ gst_tmpfile_allocator_alloc (GstAllocator * allocator, gsize size,
   if (fd < 0)
     return NULL;
   mem = gst_fd_allocator_alloc (alloc->fd_allocator, fd, maxsize,
-      GST_FD_MEMORY_FLAG_NONE);
+      GST_FD_MEMORY_FLAG_KEEP_MAPPED);
   gst_memory_resize (mem, pad (params->prefix, params->align), size);
   return mem;
 }

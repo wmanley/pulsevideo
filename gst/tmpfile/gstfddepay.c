@@ -264,7 +264,7 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
     goto error;
   }
   fdmem = gst_fd_allocator_alloc (fddepay->fd_allocator, fd,
-      msg.offset + msg.size, GST_FD_MEMORY_FLAG_NONE);
+      msg.offset + msg.size, GST_FD_MEMORY_FLAG_KEEP_MAPPED);
   fd = -1;
   gst_memory_resize (fdmem, msg.offset, msg.size);
   GST_MINI_OBJECT_FLAG_SET (fdmem, GST_MEMORY_FLAG_READONLY);
