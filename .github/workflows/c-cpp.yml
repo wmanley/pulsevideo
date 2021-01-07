@@ -29,6 +29,7 @@ jobs:
         python-dbus
         python-pytest
         python-pytest-xdist
+        python-subprocess32
     - name: make check
       continue-on-error: true
       run: make check
