@@ -87,13 +87,13 @@ check-gst: ./tests/socketintegrationtest
 	GST_PLUGIN_PATH=$(CURDIR)/build LD_LIBRARY_PATH=$(CURDIR)/build ./tests/socketintegrationtest
 
 check-gst-gdb: ./tests/socketintegrationtest
-	GST_PLUGIN_PATH=$(CURDIR)/build LD_LIBRARY_PATH=$(CURDIR)/build CK_FORK=no G_DEBUG=fatal_warnings gdb ./tests/socketintegrationtest
+	GST_PLUGIN_PATH=$(CURDIR)/build LD_LIBRARY_PATH=$(CURDIR)/build CK_FORK=no G_DEBUG=fatal-warnings gdb ./tests/socketintegrationtest
 
 check-gst-valgrind: ./tests/socketintegrationtest common/
 	GST_PLUGIN_PATH=$(CURDIR)/build \
 	G_SLICE=always-malloc \
 	LD_LIBRARY_PATH=$(CURDIR)/build \
-	G_DEBUG=fatal_warnings \
+	G_DEBUG=fatal-warnings \
 	valgrind --tool=memcheck \
 	         --suppressions=./common/gst.supp \
 	         --leak-check=full \

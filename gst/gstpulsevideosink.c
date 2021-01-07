@@ -362,11 +362,13 @@ on_handle_attach (GstVideoSource2         *interface,
   inpad = gst_element_get_static_pad (sink->fdpay, "sink");
   g_assert (inpad);
   caps = gst_pad_get_current_caps (inpad);
-  /* We will always have caps at this point because we don't register the dbus
+  /* We should have caps at this point because we don't register the dbus
    * callback until the child elements are at least in state PAUSED, so should
    * have completed caps negotiation */
-  if (!caps)
+  if (!caps) {
+    g_set_error (&gerror, G_IO_ERROR, G_IO_ERROR_FAILED, "Caps not available");
     goto out;
+  }
   caps_str = gst_caps_to_string (caps);
 
   static struct FaultInjectionPoint pre_attach = FAULT_INJECTION_POINT("pre_attach");
