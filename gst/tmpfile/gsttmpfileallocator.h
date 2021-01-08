@@ -30,5 +30,7 @@ GstAllocator* gst_tmpfile_allocator_new (void);
 GstMemory * gst_tmpfile_allocator_copy_alloc (GstAllocator * alloc,
     const void * data, size_t n);
 
+gsize tmpfile_mmap_threshold (void);
+
 G_END_DECLS
 #endif

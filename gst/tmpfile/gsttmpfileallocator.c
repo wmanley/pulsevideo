@@ -30,6 +30,7 @@
 #include <unistd.h>
 
 #define PAGE_ALIGN 4095
+#define DEFAULT_MMAP_THRESHOLD (128 * 1024)
 
 GST_DEBUG_CATEGORY_STATIC (gst_tmpfileallocator_debug);
 #define GST_CAT_DEFAULT gst_tmpfileallocator_debug
@@ -42,6 +43,7 @@ typedef struct
   GstAllocator *fd_allocator;
   uint32_t frame_count;
   uint32_t pid;
+  gsize mmap_threshold;
 } GstTmpFileAllocator;
 
 typedef struct
@@ -81,6 +83,24 @@ gst_tmpfile_allocator_init (GstTmpFileAllocator * alloc)
   alloc->fd_allocator = gst_fd_allocator_new ();
   alloc->frame_count = 0;
   alloc->pid = getpid();
+  alloc->mmap_threshold = tmpfile_mmap_threshold ();
+}
+
+gsize tmpfile_mmap_threshold (void)
+{
+  static gsize mmap_threshold = 0;
+  if (g_once_init_enter (&mmap_threshold))
+  {
+    const char* st = getenv("TMPFILE_MMAP_THRESHOLD");
+    if (st == NULL)
+      st = "";
+    gsize mt = atol(st);
+    if (mt == 0)
+      mt = DEFAULT_MMAP_THRESHOLD;
+
+    g_once_init_leave (&mmap_threshold, mt);
+  }
+  return mmap_threshold;
 }
 
 static void
@@ -156,6 +176,12 @@ gst_tmpfile_allocator_alloc (GstAllocator * allocator, gsize size,
   maxsize =
       pad (size + pad (params->prefix, params->align) + params->padding,
       PAGE_ALIGN);
+
+  if (maxsize < alloc->mmap_threshold) {
+    /* Below a certain size the cost of mmap outweighs the cost of copying the
+     * data */
+    return gst_allocator_alloc (NULL, size, params);
+  }
 
   if (alloc->fd_allocator == NULL)
     return NULL;
