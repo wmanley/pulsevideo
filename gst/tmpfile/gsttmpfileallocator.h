@@ -27,5 +27,8 @@ G_BEGIN_DECLS
 /* Allocator that allocates memory from a file stored on a tmpfs */
 GstAllocator* gst_tmpfile_allocator_new (void);
 
+GstMemory * gst_tmpfile_allocator_copy_alloc (GstAllocator * alloc,
+    const void * data, size_t n);
+
 G_END_DECLS
 #endif

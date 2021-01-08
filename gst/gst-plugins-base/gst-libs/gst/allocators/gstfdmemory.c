@@ -90,13 +90,21 @@ gst_fd_mem_map (GstMemory * gmem, gsize maxsize, GstMapFlags flags)
   g_mutex_lock (&mem->lock);
   /* do not mmap twice the buffer */
   if (mem->data) {
-    /* only return address if mapping flags are a subset
+    /* adjust mapping protections if mapping flags aren't a subset
      * of the previous flags */
-    if ((mem->mmapping_flags & prot) == prot) {
-      ret = mem->data;
-      mem->mmap_count++;
+    if ((mem->mmapping_flags & prot) != prot) {
+      unsigned new_prot = (mem->mmapping_flags & (PROT_READ | PROT_WRITE)) | prot;
+      GST_DEBUG ("GstFdMemory %p: Adjusting mapping protections from 0x%x to "
+          "0x%x", mem, (unsigned) mem->mmapping_flags, (unsigned) new_prot);
+      if (mprotect ((void *) mem->data, gmem->maxsize, new_prot) != 0) {
+        GST_INFO ("GstFdMemory %p: Adjusting mapping protections on %p "
+            "to 0x%x failed: %s", mem->data, mem, new_prot, strerror (errno));
+        goto out;
+      }
+      mem->mmapping_flags |= new_prot;
     }
-
+    ret = mem->data;
+    mem->mmap_count++;
     goto out;
   }
 
