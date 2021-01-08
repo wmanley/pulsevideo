@@ -98,7 +98,7 @@ gst_fd_mem_map (GstMemory * gmem, gsize maxsize, GstMapFlags flags)
           "0x%x", mem, (unsigned) mem->mmapping_flags, (unsigned) new_prot);
       if (mprotect ((void *) mem->data, gmem->maxsize, new_prot) != 0) {
         GST_INFO ("GstFdMemory %p: Adjusting mapping protections on %p "
-            "to 0x%x failed: %s", mem->data, mem, new_prot, strerror (errno));
+            "to 0x%x failed: %s", mem->data, mem, new_prot, g_strerror (errno));
         goto out;
       }
       mem->mmapping_flags |= new_prot;
