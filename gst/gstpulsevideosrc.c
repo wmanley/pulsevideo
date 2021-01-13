@@ -311,6 +311,10 @@ is_dbus_error_recoverable(GError * err)
   /* These errors are associated with the remote pulsevideo crashing, in which
    * case we can try and reconnect.  We don't want to reconnect unconditionally
    * as this can just make things worse (e.g. resource starvation) */
+  if (g_error_matches (err, G_DBUS_ERROR, G_DBUS_ERROR_SERVICE_UNKNOWN))
+    return FALSE;
+  if (g_dbus_error_is_remote_error (err))
+    return TRUE;
   return g_error_matches (err, G_DBUS_ERROR, G_DBUS_ERROR_NO_REPLY) ||
     g_error_matches (err, G_DBUS_ERROR, G_DBUS_ERROR_SPAWN_CHILD_EXITED) ||
     g_error_matches (err, G_DBUS_ERROR, G_DBUS_ERROR_SPAWN_CHILD_SIGNALED) ||

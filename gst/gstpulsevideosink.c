@@ -80,6 +80,7 @@ static GstStateChangeReturn gst_pulsevideo_sink_change_state (
 static gboolean on_handle_attach (GstVideoSource2 *interface,
     GDBusMethodInvocation *invocation, GUnixFDList* fdlist, gpointer user_data);
 
+static GstCaps *wait_get_caps (GstPad *pad, guint64 end_time, GError** err);
 
 static void
 gst_pulsevideo_sink_class_init (GstPulseVideoSinkClass * klass)
@@ -361,14 +362,10 @@ on_handle_attach (GstVideoSource2         *interface,
 
   inpad = gst_element_get_static_pad (sink->fdpay, "sink");
   g_assert (inpad);
-  caps = gst_pad_get_current_caps (inpad);
-  /* We should have caps at this point because we don't register the dbus
-   * callback until the child elements are at least in state PAUSED, so should
-   * have completed caps negotiation */
-  if (!caps) {
-    g_set_error (&gerror, G_IO_ERROR, G_IO_ERROR_FAILED, "Caps not available");
+  caps = wait_get_caps (inpad,
+      g_get_monotonic_time () + 20 * G_TIME_SPAN_SECOND, &gerror);
+  if (!caps)
     goto out;
-  }
   caps_str = gst_caps_to_string (caps);
 
   static struct FaultInjectionPoint pre_attach = FAULT_INJECTION_POINT("pre_attach");
@@ -396,6 +393,22 @@ out:
 //    g_variant_unref (their_socket_idx);
   g_clear_object (&their_socket_list);
   return TRUE;
+}
+
+static GstCaps *
+wait_get_caps (GstPad *pad, guint64 end_time, GError** err)
+{
+  /* Sleeping is a bit of a hack, but should be robust in its simplicicity */
+  GstCaps *caps = NULL;
+  while ((caps = gst_pad_get_current_caps (pad)) == NULL) {
+    if (g_get_monotonic_time () > end_time) {
+      g_set_error (err, G_IO_ERROR, G_IO_ERROR_TIMED_OUT,
+          "Timeout waiting for caps");
+      break;
+    }
+    g_usleep (10000);
+  }
+  return caps;
 }
 
 GDBusConnection * connect_to_dbus(GDBusConnection * connection, GError ** error)
