@@ -37,6 +37,7 @@
 #include "gstfddepay.h"
 #include "wire-protocol.h"
 #include "../gstnetcontrolmessagemeta.h"
+#include "gsttmpfileallocator.h"
 
 #include <gst/gst.h>
 #include <gst/base/gstbasetransform.h>
@@ -201,6 +202,14 @@ gst_fddepay_set_clock (GstElement * element, GstClock * clock)
       clock);
 }
 
+static int
+steal_fd (int *p_fd)
+{
+  int fd = *p_fd;
+  *p_fd = -1;
+  return fd;
+}
+
 static GstFlowReturn
 gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
 {
@@ -263,11 +272,34 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
         fd, (ssize_t) statbuf.st_size, msg.offset, msg.size);
     goto error;
   }
-  fdmem = gst_fd_allocator_alloc (fddepay->fd_allocator, fd,
-      msg.offset + msg.size, GST_FD_MEMORY_FLAG_KEEP_MAPPED);
-  fd = -1;
-  gst_memory_resize (fdmem, msg.offset, msg.size);
-  GST_MINI_OBJECT_FLAG_SET (fdmem, GST_MEMORY_FLAG_READONLY);
+  if (msg.size >= tmpfile_mmap_threshold ()) {
+    fdmem = gst_fd_allocator_alloc (fddepay->fd_allocator, steal_fd(&fd),
+        msg.offset + msg.size, GST_FD_MEMORY_FLAG_KEEP_MAPPED);
+    gst_memory_resize (fdmem, msg.offset, msg.size);
+    GST_MINI_OBJECT_FLAG_SET (fdmem, GST_MEMORY_FLAG_READONLY);
+  } else {
+    g_autofree char *buf = g_malloc (msg.size);
+    size_t off = 0;
+    while (off < msg.size) {
+      ssize_t res = pread (fd, buf + off, msg.size - off, msg.offset + off);
+      if (res < 0) {
+        if (errno == EINTR)
+          continue;
+        GST_WARNING_OBJECT (fddepay, "fddepay: Reading from fd %i failed: %s",
+            fd, g_strerror(errno));
+        goto error;
+      } else if (res == 0) {
+        GST_WARNING_OBJECT (fddepay, "fddepay: Reading from fd %i failed: "
+            "Unexpected EOS", fd);
+        goto error;
+      } else {
+        off += res;
+      }
+    }
+    fdmem = gst_memory_new_wrapped (0, g_steal_pointer(&buf), msg.size,
+        msg.offset, msg.size, buf, g_free);
+    close (steal_fd(&fd));
+  }
 
   gst_buffer_remove_all_memory (buf);
   gst_buffer_remove_meta (buf,
