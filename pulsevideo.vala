@@ -26,7 +26,7 @@ Gst.Pipeline create_videosource(string source, string caps, string object_path,
 {
     // Creating pipeline and elements
     var pipeline = (Gst.Pipeline) Gst.parse_launch(
-        source + " ! pvwatchdog ! pulsevideosink caps=\"" + caps
+        source + " ! pulsevideosink caps=\"" + caps
         + "\" object-path=\"" + object_path + "\" " +
         "bus-name=\"com.stbtester.VideoSource." + bus_name_suffix + "\"");
 
