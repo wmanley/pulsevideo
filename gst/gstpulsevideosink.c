@@ -312,6 +312,7 @@ failure:
   }
 }
 
+#if GST_VERSION_MINOR < 16
 static void
 gst_clear_caps (GstCaps **pcaps)
 {
@@ -320,6 +321,7 @@ gst_clear_caps (GstCaps **pcaps)
     *pcaps = NULL;
   }
 }
+#endif
 
 static gboolean
 on_handle_attach (GstVideoSource2         *interface,
