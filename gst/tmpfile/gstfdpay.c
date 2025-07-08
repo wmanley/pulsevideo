@@ -238,7 +238,7 @@ gst_fdpay_propose_allocation (GstBaseTransform * trans,
   }
 
   GST_INFO_OBJECT (fdpay, "Proposing pool");
-  gst_query_add_allocation_pool (query, pool, 0, 0, 0);
+  gst_query_add_allocation_pool (query, pool, info.size, 0, 0);
 
   if (!GST_BASE_TRANSFORM_CLASS (gst_fdpay_parent_class)->propose_allocation (trans,
           decide_query, query))
