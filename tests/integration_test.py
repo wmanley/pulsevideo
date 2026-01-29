@@ -1,13 +1,14 @@
 import os
+import pipes
 import re
-import shlex
 import shutil
 import signal
-import socket
+import sys
 import subprocess
 import tempfile
 import threading
 import time
+import typing
 from collections import namedtuple
 from contextlib import contextmanager
 from textwrap import dedent
@@ -15,8 +16,10 @@ from textwrap import dedent
 import dbus
 import pytest
 
+# pylint: disable=missing-function-docstring,redefined-outer-name,consider-using-f-string,import-outside-toplevel,missing-class-docstring
 
-@pytest.fixture(scope='function')
+
+@pytest.yield_fixture(scope='function')
 def tmpdir():
     dir_ = tempfile.mkdtemp(prefix='pulsevideo-tests-')
     try:
@@ -27,7 +30,7 @@ def tmpdir():
 DEFAULT_SOURCE_PIPELINE = 'videotestsrc is-live=true'
 
 
-def pulsevideo_cmdline(source_pipeline=None):
+def pulsevideo_cmdline(source_pipeline: "str | None" = None):
     if source_pipeline is None:
         source_pipeline = DEFAULT_SOURCE_PIPELINE
     return ['/usr/bin/env',
@@ -44,32 +47,31 @@ TestCtx = namedtuple('TestCtx', 'bus pulsevideod')
 
 
 @contextmanager
-def pulsevideo_via_activation(tmpdir):
+def pulsevideo_via_activation(tmpdir: str):
     mkdir_p('%s/services' % tmpdir)
 
-    with open('%s/pulsevideo' % tmpdir, 'w') as f:
+    with open('%s/pulsevideo' % tmpdir, 'w', encoding="utf-8") as f:
         f.write(
             "#!/bin/sh -ex\n"
             "exec %s\n" % (shquote(pulsevideo_cmdline())))
         os.fchmod(f.fileno(), 0o755)
 
     with open('%s/services/com.stbtester.VideoSource.test.service' % tmpdir,
-              'w') as out, \
+              'wb') as out, \
             open('%s/com.stbtester.VideoSource.test.service.in'
-                 % os.path.dirname(__file__)) as in_:
-        out.write(in_.read().replace('@TMPDIR@', tmpdir))
+                 % os.path.dirname(__file__), "rb") as in_:
+        out.write(in_.read().replace(b'@TMPDIR@', tmpdir.encode()))
 
     with dbus_ctx(tmpdir) as (_, bus_address):
-        import dbus
         yield TestCtx(dbus.bus.BusConnection(bus_address), None)
 
 
-def shquote(l):
-    return ' '.join(shlex.quote(x) for x in l)
+def shquote(l: "typing.Sequence[str]") -> str:
+    return ' '.join(pipes.quote(x) for x in l)
 
 
 @contextmanager
-def pulsevideo_ctx(dir_, source_pipeline=None):
+def pulsevideo_ctx(dir_: str, source_pipeline: "str | None" = None):
     with dbus_ctx(dir_) as (dbus_daemon, bus_address):
         pulsevideod = subprocess.Popen(pulsevideo_cmdline(source_pipeline))
         sbus = dbus.bus.BusConnection(bus_address)
@@ -83,16 +85,10 @@ def pulsevideo_ctx(dir_, source_pipeline=None):
         sbus.close()
 
 
-@pytest.fixture(scope='function')
-def pulsevideo(tmpdir):
+@pytest.yield_fixture(scope='function')
+def pulsevideo(tmpdir: str):
     with pulsevideo_ctx(tmpdir) as pulsevideod:
         yield pulsevideod
-
-
-@pytest.fixture(scope='function')
-def dbus_fixture(tmpdir):
-    with dbus_ctx(tmpdir) as x:
-        yield x
 
 
 def mkdir_p(dirs):
@@ -104,23 +100,29 @@ def mkdir_p(dirs):
             raise
 
 
+class DBusCtx(typing.NamedTuple):
+    dbus_daemon: "subprocess.Popen[bytes]"
+    address: str
+
+
 @contextmanager
-def dbus_ctx(dir_):
+def dbus_ctx(dir_: str):
     socket_path = '%s/dbus_socket' % dir_
     mkdir_p('%s/services' % dir_)
 
-    with open('%s/session.conf' % dir_, 'w') as out, \
-            open('%s/session.conf.in' % os.path.dirname(__file__)) as in_:
+    with open('%s/session.conf' % dir_, 'wb') as out, \
+            open('%s/session.conf.in' % os.path.dirname(__file__), 'rb') as in_:
         out.write(in_.read()
-                  .replace('@DBUS_SOCKET@', socket_path)
-                  .replace('@SERVICEDIR@', "%s/services" % dir_))
+                  .replace(b'@DBUS_SOCKET@', socket_path.encode())
+                  .replace(b'@SERVICEDIR@', b"%s/services" % dir_.encode()))
 
     dbus_daemon = subprocess.Popen(
         ['dbus-daemon', '--config-file=%s/session.conf' % dir_, '--nofork'])
     for _ in range(100):
         if os.path.exists(socket_path):
             break
-        assert dbus_daemon.poll() is None, "dbus-daemon failed to start up.  Failed with exit status %i" % dbus_daemon.returncode
+        assert dbus_daemon.poll() is None, \
+            "dbus-daemon failed to start up.  Failed with exit status %i" % dbus_daemon.returncode
         time.sleep(0.1)
     else:
         assert False, "dbus-daemon didn't take socket-path"
@@ -129,7 +131,7 @@ def dbus_ctx(dir_):
     os.environ['DBUS_SESSION_BUS_ADDRESS'] = address
 
     try:
-        yield dbus_daemon, address
+        yield DBusCtx(dbus_daemon, address)
     finally:
         os.remove(socket_path)
         dbus_daemon.kill()
@@ -137,8 +139,8 @@ def dbus_ctx(dir_):
         del os.environ['DBUS_SESSION_BUS_ADDRESS']
 
 
-class FrameCounter(object):
-    def __init__(self, file_, frame_size=320 * 240 * 3, echo=False):
+class FrameCounter:
+    def __init__(self, file_: "typing.IO[bytes]", frame_size=320 * 240 * 3, echo=False):
         self.file = file_
         self.count = 0
         self.frame_size = 320 * 240 * 3
@@ -154,7 +156,7 @@ class FrameCounter(object):
         while True:
             new_data = self.file.read(self.frame_size)
             if self.echo:
-                print(new_data, end=' ')
+                sys.stdout.buffer.write(new_data)
 
             new_bytes_read = len(new_data)
             bytes_read += new_bytes_read
@@ -163,13 +165,14 @@ class FrameCounter(object):
             self.count = bytes_read // self.frame_size
 
 
-def test_with_dbus(tmpdir):
+def test_with_dbus(tmpdir: str):
     with pulsevideo_via_activation(tmpdir):
         os.environ['GST_DEBUG'] = "3,*videosource*:9"
         gst_launch = subprocess.Popen(
             ['gst-launch-1.0', 'pulsevideosrc',
              'bus-name=com.stbtester.VideoSource.test', '!', 'fdsink'],
             stdout=subprocess.PIPE)
+        assert gst_launch.stdout is not None
         fc = FrameCounter(gst_launch.stdout)
         fc.start()
 
@@ -187,7 +190,7 @@ def test_with_dbus(tmpdir):
         assert 5 <= fps <= 15
 
 
-def wait_until(f, timeout_secs=10):
+def wait_until(f: "typing.Callable[[], bool]", timeout_secs=10):
     expiry_time = time.time() + timeout_secs
     while True:
         val = f()
@@ -197,10 +200,12 @@ def wait_until(f, timeout_secs=10):
             return val  # falsy
 
 
-def test_that_pulsevideosrc_recovers_if_pulsevideo_crashes(tmpdir, capfdbinary):
+def test_that_pulsevideosrc_recovers_if_pulsevideo_crashes(
+        tmpdir: str, capfdbinary: "pytest.CaptureFixture[bytes]",
+):
     with pulsevideo_via_activation(tmpdir):
         cmd = shquote(pulsevideo_cmdline())
-        with open("%s/pulsevideo" % tmpdir, 'w') as f:
+        with open("%s/pulsevideo" % tmpdir, 'w', encoding="utf-8") as f:
             f.write(dedent("""\
                 #!/bin/bash -ex
 
@@ -232,6 +237,7 @@ def test_that_pulsevideosrc_recovers_if_pulsevideo_crashes(tmpdir, capfdbinary):
             ['gst-launch-1.0', '-e', '-q', 'pulsevideosrc',
              'bus-name=com.stbtester.VideoSource.test', '!', 'fdsink'],
             stdout=subprocess.PIPE)
+        assert gst_launch.stdout is not None
         fc = FrameCounter(gst_launch.stdout)
         fc.start()
         assert wait_until(lambda: fc.count > 20, 20)
@@ -240,25 +246,25 @@ def test_that_pulsevideosrc_recovers_if_pulsevideo_crashes(tmpdir, capfdbinary):
         gst_launch.wait()
 
         # Make sure each of our failure scenarios actually happened:
-        stderr = capfdbinary.readouterr().err.decode('utf-8', 'replace')
-        assert "Activated service 'com.stbtester.VideoSource.test' failed" in stderr
-        assert "Aborted" in stderr
-        assert "Error: Watchdog triggered" in stderr
-        assert "Error: Internal data stream error." in stderr
+        stderr = capfdbinary.readouterr().err
+        assert b"Activated service 'com.stbtester.VideoSource.test' failed" in stderr
+        assert b"Aborted" in stderr
+        assert b"Error: Watchdog triggered" in stderr
+        assert b"Error: Internal data stream error." in stderr
 
 
-def test_that_pulsevideosrc_fails_if_pulsevideo_is_not_available(
-        dbus_fixture):
-    os.environ['GST_DEBUG'] = "3,*videosource*:9"
-    gst_launch = subprocess.Popen(
-        ['gst-launch-1.0', 'pulsevideosrc',
-         'bus-name=com.stbtester.VideoSource.test', '!', 'fdsink'])
-    assert wait_until(lambda: gst_launch.poll() is not None, 2)
-    assert gst_launch.returncode != 0
+def test_that_pulsevideosrc_fails_if_pulsevideo_is_not_available(tmpdir: str):
+    with dbus_ctx(tmpdir):
+        os.environ['GST_DEBUG'] = "3,*videosource*:9"
+        gst_launch = subprocess.Popen(
+            ['gst-launch-1.0', 'pulsevideosrc',
+            'bus-name=com.stbtester.VideoSource.test', '!', 'fdsink'])
+        assert wait_until(lambda: gst_launch.poll() is not None, 2)
+        assert gst_launch.returncode != 0
 
 
 def test_that_pulsevideosrc_gets_eos_if_pulsevideo_crashes_and_cant_be_activated(
-        pulsevideo):
+        pulsevideo: TestCtx):
     print(time.time())
     os.environ['GST_DEBUG'] = "3,*videosource*:9"
     print(time.time())
@@ -266,6 +272,7 @@ def test_that_pulsevideosrc_gets_eos_if_pulsevideo_crashes_and_cant_be_activated
         ['gst-launch-1.0', '-q', 'pulsevideosrc',
          'bus-name=com.stbtester.VideoSource.test', '!', 'fdsink'],
         stdout=subprocess.PIPE)
+    assert gst_launch.stdout is not None
     fc = FrameCounter(gst_launch.stdout)
     fc.start()
     assert wait_until(lambda: fc.count > 1)
@@ -274,11 +281,12 @@ def test_that_pulsevideosrc_gets_eos_if_pulsevideo_crashes_and_cant_be_activated
     assert gst_launch.returncode == 0
 
 
-def test_that_pulsevideo_doesnt_leak_fds(pulsevideo):
+def test_that_pulsevideo_doesnt_leak_fds(pulsevideo: TestCtx):
     gst_launch = subprocess.Popen(
         ['gst-launch-1.0', '-q', 'pulsevideosrc',
          'bus-name=com.stbtester.VideoSource.test', '!', 'fdsink'],
         stdout=subprocess.PIPE)
+    assert gst_launch.stdout is not None
     count_fds = lambda pid: len(os.listdir('/proc/%i/fd/' % pid))
     fc = FrameCounter(gst_launch.stdout)
     fc.start()
@@ -301,6 +309,8 @@ def test_that_we_can_tee_fddepay():
          't.', '!', 'queue', '!', 'pvfddepay', '!', CAPS, '!', 'fdsink', 'fd=1',
          't.', '!', 'queue', '!', 'pvfddepay', '!', CAPS, '!', 'fdsink', 'fd=2'],
          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert gst_launch.stdout is not None
+    assert gst_launch.stderr is not None
     fc1 = FrameCounter(gst_launch.stdout)
     fc1.start()
 
@@ -310,7 +320,7 @@ def test_that_we_can_tee_fddepay():
     assert wait_until(lambda: fc2.count > 1)
 
 
-def test_that_backing_memory_is_not_reused(pulsevideo):
+def test_that_backing_memory_is_not_reused(pulsevideo: TestCtx):
     """
     This is a regression test.  There used to be a problem where only one
     temporary file was created and sent and it was then reused by pulsevideo.
@@ -337,7 +347,7 @@ def test_that_backing_memory_is_not_reused(pulsevideo):
     assert initial_data == after_next_data
 
 
-def test_that_invalid_sized_buffers_are_dropped(tmpdir):
+def test_that_invalid_sized_buffers_are_dropped(tmpdir: str):
     expected_buffer_size = 3 * 320 * 240
 
     # Should mean that only half the buffers (~50) get through:
@@ -348,28 +358,29 @@ def test_that_invalid_sized_buffers_are_dropped(tmpdir):
     with pulsevideo_ctx(tmpdir, source_pipeline=source_pipeline):
         os.environ['GST_DEBUG'] = '3'
         try:
-            subprocess.check_output(
+            output = subprocess.check_output(
                 ['gst-launch-1.0', '-q', 'pulsevideosrc',
                  'bus-name=com.stbtester.VideoSource.test',
                  '!', 'identity', 'error-after=101',
-                 '!', 'checksumsink'], universal_newlines=True)
+                 '!', 'checksumsink'])
         except subprocess.CalledProcessError as e:
             output = e.output
-        buffers = [x.split() for x in output.strip().split('\n')]
+            assert isinstance(output, bytes)
+        buffers = [x.split() for x in output.strip().split(b'\n')]
         assert len(buffers) == 100
 
         # If they were of different sizes the checksum would be different:
-        assert all(x[1] == 'b2fa672f8bba0b9c504e83c5b17ac848f0c14977'
+        assert all(x[1] == b'b2fa672f8bba0b9c504e83c5b17ac848f0c14977'
                    for x in buffers)
 
 
-def test_that_teardown_succeeds_during_error_recovery(tmpdir):
+def test_that_teardown_succeeds_during_error_recovery(tmpdir: str):
     with pulsevideo_via_activation(tmpdir):
         cmd = shquote(pulsevideo_cmdline())
 
         # Pipe used to signal back to the test that we've entered error-recovery
         os.mkfifo("%s/fifo" % tmpdir)
-        with open("%s/pulsevideo" % tmpdir, 'w') as f:
+        with open("%s/pulsevideo" % tmpdir, 'w', encoding="utf-8") as f:
             f.write(dedent("""\
                 #!/bin/bash -ex
 
@@ -392,12 +403,13 @@ def test_that_teardown_succeeds_during_error_recovery(tmpdir):
             ['gst-launch-1.0', '-q', 'pulsevideosrc',
              'bus-name=com.stbtester.VideoSource.test', '!', 'fdsink'],
             stdout=subprocess.PIPE)
+        assert gst_launch.stdout is not None
         fc = FrameCounter(gst_launch.stdout)
         fc.start()
         assert wait_until(lambda: fc.count > 0)
 
         # Wait for pulsevideosrc error recovery mode to kick in:
-        with open("%s/fifo" % tmpdir) as f:
+        with open("%s/fifo" % tmpdir, "rb") as f:
             f.read()
 
         # Now we know that the pulsevideosrc is in error recovery mode blocked
@@ -408,24 +420,26 @@ def test_that_teardown_succeeds_during_error_recovery(tmpdir):
         assert gst_launch.wait(5) is not None
 
 
-def parse_gst_timestamp(timestamp):
-    m = re.match(r"(\d+):(\d\d):(\d\d\.\d+)", timestamp)
+def parse_gst_timestamp(timestamp: bytes):
+    m = re.match(rb"(\d+):(\d\d):(\d\d\.\d+)", timestamp)
     if m:
         return (int(m.group(1)) * 60 * 60 + int(m.group(2)) * 60
                 + float(m.group(3)))
+    else:
+        raise ValueError("Invalid GST timestamp: %r" % timestamp)
 
 
-def test_that_timestamps_are_preserved(tmpdir):
+def test_that_timestamps_are_preserved(tmpdir: str):
     with pulsevideo_ctx(tmpdir, source_pipeline='videotestsrc is-live=false'):
         try:
             output = subprocess.check_output(
                 ['gst-launch-1.0', '-q', 'pulsevideosrc',
                  'bus-name=com.stbtester.VideoSource.test', '!', 'identity',
-                 'error-after=11', '!', 'checksumsink'],
-                universal_newlines=True)
+                 'error-after=11', '!', 'checksumsink'])
         except subprocess.CalledProcessError as e:
             output = e.output
-    buffers = [x.split() for x in output.strip().split('\n')]
+            assert isinstance(output, bytes)
+    buffers = [x.split() for x in output.strip().split(b'\n')]
     timestamps = [parse_gst_timestamp(x[0]) for x in buffers]
     assert len(timestamps) == 10
     for n in range(1, 9):
