@@ -56,22 +56,35 @@ static int
 tmpfile_create (GstTmpFileAllocator * allocator)
 {
   char filename[256];
-  int fd;
+  int fd = -1;
+  int frame_count = allocator->frame_count++;
 
-  /* This should not be strictly necessary, but it can be useful to know more
-     about where an fd came from when looking in /proc/<PID>/fd/ */
-  snprintf(filename, sizeof(filename),
-      "/dev/shm/gsttmpfilepay.%05d.%010d.XXXXXX",
-      allocator->pid, allocator->frame_count++);
+  for (int n = 0;; n++) {
+    /* This should not be strictly necessary, but it can be useful to know more
+      about where an fd came from when looking in /proc/<PID>/fd/ */
+    switch (n) {
+      case 0:
+        snprintf(filename, sizeof(filename),
+            "/dev/shm/gsttmpfilepay.%05d.%010d.XXXXXX",
+            allocator->pid, frame_count);
+        break;
+      case 1:
+        snprintf(filename, sizeof(filename),
+            "/run/user/%i/gsttmpfilepay.%05d.%010d.XXXXXX",
+            getuid(), allocator->pid, frame_count);
+        break;
+      default:
+        GST_WARNING_OBJECT (allocator, "Failed to create temporary file: %s",
+          strerror (errno));
+        g_return_val_if_reached (-1);
+    }
 
-  fd = mkostemp (filename, O_CLOEXEC);
-  if (fd == -1) {
-    GST_WARNING_OBJECT (allocator, "Failed to create temporary file: %s",
-        strerror (errno));
-    return -1;
+    fd = mkostemp (filename, O_CLOEXEC);
+    if (fd >= 0) {
+      break;
+    }
   }
   unlink (filename);
-
   return fd;
 }
 
