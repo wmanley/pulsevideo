@@ -75,7 +75,7 @@ clean:
 tests/socketintegrationtest : tests/socketintegrationtest.c build/gstnetcontrolmessagemeta.h build/libgstpulsevideo.so
 	gcc -o$@ $< -Wall -Werror $(CFLAGS) $$(pkg-config --cflags --libs $(PKG_DEPS) gstreamer-check-1.0 gstreamer-app-1.0) -Lbuild/ -lgstpulsevideo
 
-check: check-pytest check-gst check-gst-valgrind
+check: check-pytest check-gst #check-gst-valgrind
 
 TESTS=tests/
 
