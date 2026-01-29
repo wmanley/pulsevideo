@@ -81,7 +81,7 @@ TESTS=tests/
 
 check-pytest : pulsevideo build/libgstpulsevideo.so
 	GST_PLUGIN_PATH=$(CURDIR)/build LD_LIBRARY_PATH=$(CURDIR)/build \
-	python3 -m pytest --forked -vv $(TESTS)
+	timeout 30 python3 -m pytest --forked -vv $(TESTS)
 
 check-gst: ./tests/socketintegrationtest
 	GST_PLUGIN_PATH=$(CURDIR)/build LD_LIBRARY_PATH=$(CURDIR)/build ./tests/socketintegrationtest
