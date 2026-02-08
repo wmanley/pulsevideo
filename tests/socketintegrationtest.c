@@ -439,7 +439,7 @@ check_monotonic_timestamp_with_clock(GstClock * clock)
 
   /* Test setup: send a simple buffer through fdpay */
   pipeline = GST_PIPELINE (gst_parse_launch (
-      "appsrc name=src format=GST_FORMAT_TIME is-live=true "
+      "appsrc name=src format=GST_FORMAT_TIME is-live=true caps=application/x-gst-check "
       "! pvfdpay "
       "! appsink name=sink sync=false async=true", NULL));
 
@@ -492,7 +492,10 @@ GST_START_TEST (test_that_buffers_from_fddepay_are_read_only)
   GstMapInfo info;
 
   pipeline = GST_PIPELINE (gst_parse_launch (
-      "appsrc name=src ! pvfdpay ! pvfddepay ! appsink name=sink", NULL));
+      "appsrc name=src caps=application/x-gst-check "
+      "! pvfdpay "
+      "! pvfddepay "
+      "! appsink name=sink caps=application/x-gst-check", NULL));
   sample = send_buffer_through_pipeline (pipeline, gst_buffer_new_wrapped (
       g_strdup ("hello"), 5));
   g_clear_object (&pipeline);
