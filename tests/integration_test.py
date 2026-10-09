@@ -141,7 +141,8 @@ class FrameCounter(object):
     def __init__(self, file_, frame_size=320 * 240 * 3, echo=False):
         self.file = file_
         self.count = 0
-        self.frame_size = 320 * 240 * 3
+        self.bytes_read = 0
+        self.frame_size = frame_size
         self.thread = threading.Thread(target=self._read_in_loop)
         self.thread.daemon = True
         self.echo = echo
@@ -160,6 +161,7 @@ class FrameCounter(object):
             bytes_read += new_bytes_read
 
             # GIL makes this thread safe :)
+            self.bytes_read = bytes_read
             self.count = bytes_read // self.frame_size
 
 
@@ -245,6 +247,64 @@ def test_that_pulsevideosrc_recovers_if_pulsevideo_crashes(tmpdir, capfdbinary):
         assert "Aborted" in stderr
         assert "Error: Watchdog triggered" in stderr
         assert "Error: Internal data stream error." in stderr
+
+
+def test_that_pulsevideosrc_renegotiates_if_caps_change(tmpdir):
+    """Reconnecting isn't enough: pulsevideosrc must also tell downstream
+    about the new caps.  Otherwise its internal rawvideovalidate keeps the
+    caps it negotiated at startup and silently drops every buffer."""
+    small = shquote(pulsevideo_cmdline())
+    big = small.replace('width=320,height=240', 'width=640,height=480')
+    assert big != small
+
+    with pulsevideo_via_activation(tmpdir):
+        with open("%s/pulsevideo" % tmpdir, 'w') as f:
+            f.write(dedent("""\
+                #!/bin/bash -ex
+
+                progress=$(cat {tmpdir}/progress || echo 0)
+                echo $((progress + 1)) >{tmpdir}/progress
+                case $progress in
+                0)
+                    # Exit by ourselves, like video-source being restarted:
+                    exec timeout 2 {small}
+                ;;
+                *)
+                    # ...and come back at a different resolution:
+                    exec {big}
+                ;;
+                esac
+                """.format(tmpdir=tmpdir, small=small, big=big)))
+
+        os.environ['GST_DEBUG'] = "3,*videosource*:9"
+        gst_launch = subprocess.Popen(
+            ['gst-launch-1.0', '-e', '-q', 'pulsevideosrc',
+             'bus-name=com.stbtester.VideoSource.test', '!', 'fdsink'],
+            stdout=subprocess.PIPE)
+        try:
+            fc = FrameCounter(gst_launch.stdout)
+            fc.start()
+            assert wait_until(lambda: fc.count > 0), "No frames at 320x240"
+
+            assert wait_until(
+                lambda: read_progress(tmpdir) >= 2, 20), \
+                "pulsevideo wasn't restarted"
+
+            before = fc.bytes_read
+            assert wait_until(
+                lambda: fc.bytes_read > before + 5 * 640 * 480 * 3, 20), \
+                "No frames after pulsevideo came back at 640x480"
+        finally:
+            gst_launch.kill()
+            gst_launch.wait()
+
+
+def read_progress(tmpdir):
+    try:
+        with open("%s/progress" % tmpdir) as f:
+            return int(f.read())
+    except (IOError, ValueError):
+        return 0
 
 
 def test_that_pulsevideosrc_fails_if_pulsevideo_is_not_available(
