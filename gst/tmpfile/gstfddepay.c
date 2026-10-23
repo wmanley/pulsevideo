@@ -65,7 +65,64 @@ static void gst_fddepay_dispose (GObject * object);
 static GstFlowReturn gst_fddepay_transform_ip (GstBaseTransform * trans,
     GstBuffer * buf);
 
+static gboolean gst_fddepay_stop (GstBaseTransform * trans);
+
 static GQuark pipe_read_fd_quark;
+
+/* Forget about memfds that we haven't received for this many messages.  The
+ * sender recycles a small pool of buffers, so in steady state we see each one
+ * every few frames.  If the sender has freed a buffer, or isn't using a pool at
+ * all, we don't want to keep lots of memory alive.  A miss costs an mmap.
+ * Can be overridden with $PULSEVIDEO_FDDEPAY_CACHE_MESSAGES. */
+static guint64 fd_cache_evict_after_messages = 16;
+
+typedef struct
+{
+  dev_t dev;
+  ino_t ino;
+} FdCacheKey;
+
+typedef struct
+{
+  FdCacheKey key;
+  /* A GstFdMemory covering the whole file with GST_FD_MEMORY_FLAG_KEEP_MAPPED.
+   * Buffers we push contain sub-memories shared from this, so the file is only
+   * mapped once.  While we hold this the fd is open, so the inode can't be
+   * freed and (dev, ino) can't refer to a different file. */
+  GstMemory *mem;
+  guint64 last_seen;
+} FdCacheEntry;
+
+static guint
+fd_cache_key_hash (gconstpointer key)
+{
+  const FdCacheKey *k = key;
+  return g_int64_hash (&(gint64) { (gint64) k->ino }) ^
+      g_int64_hash (&(gint64) { (gint64) k->dev });
+}
+
+static gboolean
+fd_cache_key_equal (gconstpointer a, gconstpointer b)
+{
+  const FdCacheKey *ka = a, *kb = b;
+  return ka->dev == kb->dev && ka->ino == kb->ino;
+}
+
+static void
+fd_cache_entry_free (gpointer data)
+{
+  FdCacheEntry *entry = data;
+  gst_memory_unref (entry->mem);
+  g_slice_free (FdCacheEntry, entry);
+}
+
+static gboolean
+fd_cache_entry_is_stale (gpointer key, gpointer value, gpointer user_data)
+{
+  FdCacheEntry *entry = value;
+  guint64 n_messages = *(guint64 *) user_data;
+  return n_messages - entry->last_seen > fd_cache_evict_after_messages;
+}
 
 static void
 gst_fddepay_close_pipe_fd (gpointer data)
@@ -125,8 +182,15 @@ gst_fddepay_class_init (GstFddepayClass * klass)
       GST_DEBUG_FUNCPTR (gst_fddepay_transform_caps);
   base_transform_class->transform_ip =
       GST_DEBUG_FUNCPTR (gst_fddepay_transform_ip);
+  base_transform_class->stop = GST_DEBUG_FUNCPTR (gst_fddepay_stop);
 
   pipe_read_fd_quark = g_quark_from_static_string ("gst-fddepay-pipe-read-fd");
+
+  {
+    const gchar *env = g_getenv ("PULSEVIDEO_FDDEPAY_CACHE_MESSAGES");
+    if (env && *env)
+      fd_cache_evict_after_messages = g_ascii_strtoull (env, NULL, 10);
+  }
 }
 
 static void
@@ -138,6 +202,8 @@ gst_fddepay_init (GstFddepay * fddepay)
   fddepay->monotonic_clock = g_object_new (GST_TYPE_SYSTEM_CLOCK,
       "clock-type", GST_CLOCK_TYPE_MONOTONIC, NULL);
   GST_OBJECT_FLAG_SET (fddepay->monotonic_clock, GST_CLOCK_FLAG_CAN_SET_MASTER);
+  fddepay->fd_cache = g_hash_table_new_full (fd_cache_key_hash,
+      fd_cache_key_equal, NULL, fd_cache_entry_free);
 }
 
 void
@@ -153,8 +219,60 @@ gst_fddepay_dispose (GObject * object)
     fddepay->fd_allocator = NULL;
   }
   g_clear_object (&fddepay->monotonic_clock);
+  g_clear_pointer (&fddepay->fd_cache, g_hash_table_unref);
 
   G_OBJECT_CLASS (gst_fddepay_parent_class)->dispose (object);
+}
+
+static gboolean
+gst_fddepay_stop (GstBaseTransform * trans)
+{
+  GstFddepay *fddepay = GST_FDDEPAY (trans);
+
+  g_hash_table_remove_all (fddepay->fd_cache);
+  fddepay->n_messages = 0;
+
+  return TRUE;
+}
+
+/* Takes ownership of fd */
+static GstMemory *
+gst_fddepay_get_memory (GstFddepay * fddepay, int fd,
+    const struct stat *statbuf, guint64 offset, guint64 size)
+{
+  FdCacheKey key = { statbuf->st_dev, statbuf->st_ino };
+  FdCacheEntry *entry;
+  GstMemory *mem;
+
+  entry = g_hash_table_lookup (fddepay->fd_cache, &key);
+  if (entry && entry->mem->maxsize < offset + size) {
+    /* The file has grown since we mapped it */
+    g_hash_table_remove (fddepay->fd_cache, &key);
+    entry = NULL;
+  }
+
+  if (entry) {
+    GST_LOG_OBJECT (fddepay, "Reusing mapping of fd %i (dev %lu ino %lu)",
+        gst_fd_memory_get_fd (entry->mem), (gulong) key.dev, (gulong) key.ino);
+    close (fd);
+  } else {
+    GST_DEBUG_OBJECT (fddepay, "New fd %i (dev %lu ino %lu, size %zi)", fd,
+        (gulong) key.dev, (gulong) key.ino, (ssize_t) statbuf->st_size);
+    entry = g_slice_new0 (FdCacheEntry);
+    entry->key = key;
+    entry->mem = gst_fd_allocator_alloc (fddepay->fd_allocator, fd,
+        statbuf->st_size, GST_FD_MEMORY_FLAG_KEEP_MAPPED);
+    GST_MINI_OBJECT_FLAG_SET (entry->mem, GST_MEMORY_FLAG_READONLY);
+    g_hash_table_insert (fddepay->fd_cache, &entry->key, entry);
+  }
+
+  entry->last_seen = ++fddepay->n_messages;
+  mem = gst_memory_share (entry->mem, offset, size);
+
+  g_hash_table_foreach_remove (fddepay->fd_cache, fd_cache_entry_is_stale,
+      &fddepay->n_messages);
+
+  return mem;
 }
 
 static GstCaps *
@@ -277,11 +395,9 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
         fd, (ssize_t) statbuf.st_size, msg.offset, msg.size);
     goto error;
   }
-  fdmem = gst_fd_allocator_alloc (fddepay->fd_allocator, fd,
-      msg.offset + msg.size, GST_FD_MEMORY_FLAG_KEEP_MAPPED);
+  fdmem = gst_fddepay_get_memory (fddepay, fd, &statbuf, msg.offset,
+      msg.size);
   fd = -1;
-  gst_memory_resize (fdmem, msg.offset, msg.size);
-  GST_MINI_OBJECT_FLAG_SET (fdmem, GST_MEMORY_FLAG_READONLY);
 
   gst_buffer_remove_all_memory (buf);
   gst_buffer_remove_meta (buf,

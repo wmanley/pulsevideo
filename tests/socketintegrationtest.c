@@ -315,8 +315,9 @@ GST_START_TEST (test_that_zerocopy_doesnt_leak_fds)
      allocate all those fds that will be reused for the lifetime of the
      pipeline.  I have to run this twice becuase the first buffer and the last
      two buffers are remembered.  I'm not quite sure why the first one is
-     remembered */
-  for (i = 0; i < 3; i++) {
+     remembered.  fddepay also caches the fds of the last 16 messages it
+     received. */
+  for (i = 0; i < 20; i++) {
     symmetry_test_assert_passthrough (&st,
         gst_buffer_new_wrapped (g_strdup ("hello"), 5));
   }

@@ -41,8 +41,11 @@
  *
  * On the reciever side there is an element called fddepay.  This element
  * receives the memfd and the read end of the pipe.  It creates a GstFdMemory
- * which maps the memfd.  It creates downstream buffers with the pipe attached,
- * and closes the pipe when the buffer is freed.
+ * which maps the memfd and keeps a mapping of (st_dev, st_ino) to the new
+ * GstMemory.  It creates downstream buffers with the pipe attached.  If it
+ * receives a memfd with the same (st_dev, st_ino) as a memfd it has already
+ * received, it reuses the GstMemory it created for the first memfd, avoiding
+ * a costly remapping.
  */
 typedef struct {
   /* Time at which the frame was originally captured against the CLOCK_MONOTONIC

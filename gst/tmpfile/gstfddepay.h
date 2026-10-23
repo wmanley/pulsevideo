@@ -36,6 +36,11 @@ struct _GstFddepay
   GstBaseTransform base_fddepay;
   GstAllocator *fd_allocator;
   GstClock *monotonic_clock;
+
+  /* (st_dev, st_ino) -> FdCacheEntry.  Lets us reuse the mapping of a memfd
+   * that we've seen before rather than mmapping it again for every buffer. */
+  GHashTable *fd_cache;
+  guint64 n_messages;
 };
 
 struct _GstFddepayClass

@@ -290,15 +290,17 @@ def test_that_pulsevideo_doesnt_leak_fds(pulsevideo: TestCtx):
     count_fds = lambda pid: len(os.listdir('/proc/%i/fd/' % pid))
     fc = FrameCounter(gst_launch.stdout)
     fc.start()
-    assert wait_until(lambda: fc.count > 1)
+    # fddepay caches the fds of the last 16 messages it received, so wait for
+    # that to fill up before we start counting.
+    assert wait_until(lambda: fc.count > 20)
     client_fd_count_1 = count_fds(gst_launch.pid)
     server_fd_count_1 = count_fds(pulsevideo.pulsevideod.pid)
-    assert wait_until(lambda: fc.count > 20)
-    client_fd_count_20 = count_fds(gst_launch.pid)
-    server_fd_count_20 = count_fds(pulsevideo.pulsevideod.pid)
+    assert wait_until(lambda: fc.count > 40)
+    client_fd_count_2 = count_fds(gst_launch.pid)
+    server_fd_count_2 = count_fds(pulsevideo.pulsevideod.pid)
 
-    assert (client_fd_count_20 - client_fd_count_1) < 5
-    assert (server_fd_count_20 - server_fd_count_1) < 5
+    assert (client_fd_count_2 - client_fd_count_1) < 5
+    assert (server_fd_count_2 - server_fd_count_1) < 5
 
 
 def test_that_we_can_tee_fddepay():
