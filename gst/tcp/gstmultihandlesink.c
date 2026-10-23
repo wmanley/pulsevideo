@@ -597,8 +597,6 @@ void
 gst_multi_handle_sink_client_init (GstMultiHandleClient * client,
     GstSyncMethod sync_method)
 {
-  GTimeVal now;
-
   client->status = GST_CLIENT_STATUS_OK;
   client->bufpos = -1;
   client->flushcount = -1;
@@ -614,8 +612,7 @@ gst_multi_handle_sink_client_init (GstMultiHandleClient * client,
   client->currently_removing = FALSE;
 
   /* update start time */
-  g_get_current_time (&now);
-  client->connect_time = GST_TIMEVAL_TO_TIME (now);
+  client->connect_time = g_get_real_time () * GST_USECOND;
   client->disconnect_time = 0;
   /* set last activity time to connect time */
   client->last_activity_time = client->connect_time;
@@ -881,11 +878,7 @@ gst_multi_handle_sink_get_stats (GstMultiHandleSink * sink,
     result = gst_structure_new_empty ("multihandlesink-stats");
 
     if (mhclient->disconnect_time == 0) {
-      GTimeVal nowtv;
-
-      g_get_current_time (&nowtv);
-
-      interval = GST_TIMEVAL_TO_TIME (nowtv) - mhclient->connect_time;
+      interval = g_get_real_time () * GST_USECOND - mhclient->connect_time;
     } else {
       interval = mhclient->disconnect_time - mhclient->connect_time;
     }
@@ -922,7 +915,6 @@ void
 gst_multi_handle_sink_remove_client_link (GstMultiHandleSink * sink,
     GList * link)
 {
-  GTimeVal now;
   GstMultiHandleClient *mhclient = (GstMultiHandleClient *) link->data;
   GstMultiHandleSinkClass *mhsinkclass = GST_MULTI_HANDLE_SINK_GET_CLASS (sink);
 
@@ -968,8 +960,7 @@ gst_multi_handle_sink_remove_client_link (GstMultiHandleSink * sink,
 
   mhsinkclass->hash_removing (sink, mhclient);
 
-  g_get_current_time (&now);
-  mhclient->disconnect_time = GST_TIMEVAL_TO_TIME (now);
+  mhclient->disconnect_time = g_get_real_time () * GST_USECOND;
 
   /* free client buffers */
   g_slist_foreach (mhclient->sending, (GFunc) gst_mini_object_unref, NULL);
@@ -1681,7 +1672,6 @@ gst_multi_handle_sink_queue_buffer (GstMultiHandleSink * mhsink,
   gboolean hash_changed = FALSE;
   gint max_buffer_usage;
   gint i;
-  GTimeVal nowtv;
   GstClockTime now;
   gint max_buffers, soft_max_buffers;
   guint cookie;
@@ -1714,8 +1704,7 @@ restart:
   for (clients = mhsink->clients; clients; clients = next) {
     GstMultiHandleClient *mhclient = clients->data;
 
-    g_get_current_time (&nowtv);
-    now = GST_TIMEVAL_TO_TIME (nowtv);
+    now = g_get_real_time () * GST_USECOND;
 
     if (cookie != mhsink->clients_cookie) {
       GST_DEBUG_OBJECT (sink, "Clients cookie outdated, restarting");

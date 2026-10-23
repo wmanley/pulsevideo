@@ -1,9 +1,10 @@
 import os
-import pipes
 import re
+import shlex
 import shutil
 import signal
 import socket
+import subprocess
 import tempfile
 import threading
 import time
@@ -13,10 +14,9 @@ from textwrap import dedent
 
 import dbus
 import pytest
-import subprocess32 as subprocess
 
 
-@pytest.yield_fixture(scope='function')
+@pytest.fixture(scope='function')
 def tmpdir():
     dir_ = tempfile.mkdtemp(prefix='pulsevideo-tests-')
     try:
@@ -65,7 +65,7 @@ def pulsevideo_via_activation(tmpdir):
 
 
 def shquote(l):
-    return ' '.join(pipes.quote(x) for x in l)
+    return ' '.join(shlex.quote(x) for x in l)
 
 
 @contextmanager
@@ -83,13 +83,13 @@ def pulsevideo_ctx(dir_, source_pipeline=None):
         sbus.close()
 
 
-@pytest.yield_fixture(scope='function')
+@pytest.fixture(scope='function')
 def pulsevideo(tmpdir):
     with pulsevideo_ctx(tmpdir) as pulsevideod:
         yield pulsevideod
 
 
-@pytest.yield_fixture(scope='function')
+@pytest.fixture(scope='function')
 def dbus_fixture(tmpdir):
     with dbus_ctx(tmpdir) as x:
         yield x
@@ -154,7 +154,7 @@ class FrameCounter(object):
         while True:
             new_data = self.file.read(self.frame_size)
             if self.echo:
-                print new_data,
+                print(new_data, end=' ')
 
             new_bytes_read = len(new_data)
             bytes_read += new_bytes_read
@@ -172,9 +172,19 @@ def test_with_dbus(tmpdir):
             stdout=subprocess.PIPE)
         fc = FrameCounter(gst_launch.stdout)
         fc.start()
+
+        # Don't start the clock until frames are actually flowing: starting
+        # gst-launch, scanning the GStreamer registry and activating
+        # pulsevideo over DBus can take most of a second on a cold CI
+        # runner, which would otherwise eat the measurement window.
+        assert wait_until(lambda: fc.count > 0), "No frames received"
+
+        start_count, start_time = fc.count, time.time()
         time.sleep(1)
-        count = fc.count
-        assert count >= 5 and count <= 15
+        fps = (fc.count - start_count) / (time.time() - start_time)
+
+        # The caps say framerate=10/1:
+        assert 5 <= fps <= 15
 
 
 def wait_until(f, timeout_secs=10):
@@ -230,7 +240,7 @@ def test_that_pulsevideosrc_recovers_if_pulsevideo_crashes(tmpdir, capfdbinary):
         gst_launch.wait()
 
         # Make sure each of our failure scenarios actually happened:
-        stderr = "".join(capfdbinary.readouterr().err)
+        stderr = capfdbinary.readouterr().err.decode('utf-8', 'replace')
         assert "Activated service 'com.stbtester.VideoSource.test' failed" in stderr
         assert "Aborted" in stderr
         assert "Error: Watchdog triggered" in stderr
@@ -249,9 +259,9 @@ def test_that_pulsevideosrc_fails_if_pulsevideo_is_not_available(
 
 def test_that_pulsevideosrc_gets_eos_if_pulsevideo_crashes_and_cant_be_activated(
         pulsevideo):
-    print time.time()
+    print(time.time())
     os.environ['GST_DEBUG'] = "3,*videosource*:9"
-    print time.time()
+    print(time.time())
     gst_launch = subprocess.Popen(
         ['gst-launch-1.0', '-q', 'pulsevideosrc',
          'bus-name=com.stbtester.VideoSource.test', '!', 'fdsink'],
@@ -342,7 +352,7 @@ def test_that_invalid_sized_buffers_are_dropped(tmpdir):
                 ['gst-launch-1.0', '-q', 'pulsevideosrc',
                  'bus-name=com.stbtester.VideoSource.test',
                  '!', 'identity', 'error-after=101',
-                 '!', 'checksumsink'])
+                 '!', 'checksumsink'], universal_newlines=True)
         except subprocess.CalledProcessError as e:
             output = e.output
         buffers = [x.split() for x in output.strip().split('\n')]
@@ -411,7 +421,8 @@ def test_that_timestamps_are_preserved(tmpdir):
             output = subprocess.check_output(
                 ['gst-launch-1.0', '-q', 'pulsevideosrc',
                  'bus-name=com.stbtester.VideoSource.test', '!', 'identity',
-                 'error-after=11', '!', 'checksumsink'])
+                 'error-after=11', '!', 'checksumsink'],
+                universal_newlines=True)
         except subprocess.CalledProcessError as e:
             output = e.output
     buffers = [x.split() for x in output.strip().split('\n')]
