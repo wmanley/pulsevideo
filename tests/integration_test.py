@@ -30,7 +30,11 @@ def tmpdir():
 DEFAULT_SOURCE_PIPELINE = 'videotestsrc is-live=true'
 
 
-def pulsevideo_cmdline(source_pipeline: "str | None" = None):
+DEFAULT_CAPS = 'video/x-raw,format=RGB,width=320,height=240,framerate=10/1'
+
+
+def pulsevideo_cmdline(source_pipeline: "str | None" = None,
+                       caps: str = DEFAULT_CAPS):
     if source_pipeline is None:
         source_pipeline = DEFAULT_SOURCE_PIPELINE
     return ['/usr/bin/env',
@@ -38,7 +42,7 @@ def pulsevideo_cmdline(source_pipeline: "str | None" = None):
             'LD_LIBRARY_PATH=%s/../build/' % os.path.dirname(__file__),
             'G_DEBUG=fatal-warnings',
             '%s/../pulsevideo' % os.path.dirname(__file__),
-            '--caps=video/x-raw,format=RGB,width=320,height=240,framerate=10/1',
+            '--caps=%s' % caps,
             '--source-pipeline=%s' % source_pipeline,
             '--bus-name-suffix=test']
 
@@ -71,9 +75,10 @@ def shquote(l: "typing.Sequence[str]") -> str:
 
 
 @contextmanager
-def pulsevideo_ctx(dir_: str, source_pipeline: "str | None" = None):
+def pulsevideo_ctx(dir_: str, source_pipeline: "str | None" = None,
+                   caps: str = DEFAULT_CAPS):
     with dbus_ctx(dir_) as (dbus_daemon, bus_address):
-        pulsevideod = subprocess.Popen(pulsevideo_cmdline(source_pipeline))
+        pulsevideod = subprocess.Popen(pulsevideo_cmdline(source_pipeline, caps))
         sbus = dbus.bus.BusConnection(bus_address)
         bus = sbus.get_object('org.freedesktop.DBus', '/')
         assert dbus_daemon.poll() is None
@@ -301,6 +306,37 @@ def test_that_pulsevideo_doesnt_leak_fds(pulsevideo: TestCtx):
 
     assert (client_fd_count_2 - client_fd_count_1) < 5
     assert (server_fd_count_2 - server_fd_count_1) < 5
+
+
+def test_that_variable_sized_buffers_dont_leak_fds(tmpdir: str):
+    # Encoded data comes in buffers of different sizes, which fdpay has to copy
+    # because it isn't in fd memory.  We once created a new buffer pool for
+    # each new size, which ran a WebRTC encoder out of fds.
+    with pulsevideo_ctx(
+            tmpdir,
+            source_pipeline='videotestsrc is-live=true pattern=ball '
+                            '! video/x-raw,framerate=30/1 ! jpegenc',
+            caps='image/jpeg') as pulsevideo:
+        # A slow client that holds on to lots of buffers, like the WebRTC
+        # stream's keyframe recovery does:
+        gst_launch = subprocess.Popen(
+            ['gst-launch-1.0', '-q', 'pulsevideosrc',
+             'bus-name=com.stbtester.VideoSource.test', '!', 'queue',
+             'max-size-buffers=300', 'max-size-bytes=0', 'max-size-time=0',
+             '!', 'identity', 'sleep-time=1000000', '!', 'fakesink'])
+        count_fds = lambda pid: len(os.listdir('/proc/%i/fd/' % pid))
+        try:
+            time.sleep(1)
+            server_fd_count_1 = count_fds(pulsevideo.pulsevideod.pid)
+            time.sleep(5)
+            server_fd_count_2 = count_fds(pulsevideo.pulsevideod.pid)
+        finally:
+            gst_launch.kill()
+            gst_launch.wait()
+
+    # Each held buffer needs its memfd and pipe, but no more than that:
+    frames_held = 5 * 30
+    assert (server_fd_count_2 - server_fd_count_1) < 2 * frames_held + 10
 
 
 def test_that_we_can_tee_fddepay():

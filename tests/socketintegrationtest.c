@@ -468,7 +468,8 @@ check_monotonic_timestamp_with_clock(GstClock * clock)
 
   fail_unless (header[1] == 0);  /* offset */
   fail_unless (header[2] == 5);  /* size */
-  /* A one-off copy, because "hello" wasn't in fd memory */
+  /* "hello" wasn't in fd memory and isn't raw audio/video, so fdpay made a
+   * one-off copy */
   fail_unless (header[3] == 0);  /* flags */
 }
 

@@ -236,6 +236,10 @@ gst_fdpay_dispose (GObject * object)
     g_hash_table_unref (fdpay->pipe_write_fds);
     fdpay->pipe_write_fds = NULL;
   }
+  if (fdpay->copy_pool) {
+    gst_buffer_pool_set_active (fdpay->copy_pool, FALSE);
+    g_clear_object (&fdpay->copy_pool);
+  }
   g_mutex_clear (&fdpay->pipe_write_fds_lock);
 
   G_OBJECT_CLASS (gst_fdpay_parent_class)->dispose (object);
@@ -300,9 +304,6 @@ gst_fdpay_propose_allocation (GstBaseTransform * trans,
 
   gst_query_parse_allocation (query, &caps, &need_pool);
 
-  /* Plain Allocator */
-  gst_query_add_allocation_param (query, fdpay->allocator, NULL);
-
   if (!need_pool) {
     GST_INFO_OBJECT (fdpay, "No pool requested.  Not proposing pool");
     goto no_pool;
@@ -330,6 +331,11 @@ gst_fdpay_propose_allocation (GstBaseTransform * trans,
         "allocation query: Not proposing pool");
     goto no_pool;
   }
+
+  /* We only propose our allocator along with a pool.  Without a pool every
+   * buffer would be a new tmpfile, which is more expensive than copying into
+   * our own copy pool, and receivers couldn't keep them mapped. */
+  gst_query_add_allocation_param (query, fdpay->allocator, NULL);
 
   GST_INFO_OBJECT (fdpay, "Proposing pool");
   gst_query_add_allocation_pool (query, pool, info.size, 8, 0);
@@ -370,35 +376,102 @@ gst_fdpay_set_clock (GstElement * element, GstClock * clock)
       clock);
 }
 
-/* Sets *may_repeat to FALSE if the returned memory is a fresh copy that we'll
- * never send again */
+static GstBuffer *
+gst_fdpay_copy_to_pool (GstFdpay * fdpay, const void *data, gsize size)
+{
+  GstBuffer *copy = NULL;
+
+  if (fdpay->copy_pool == NULL || fdpay->copy_pool_size < size) {
+    GstStructure *config;
+    gsize pool_size = (size + 4095) & ~(gsize) 4095;
+
+    if (fdpay->copy_pool) {
+      gst_buffer_pool_set_active (fdpay->copy_pool, FALSE);
+      g_clear_object (&fdpay->copy_pool);
+    }
+    fdpay->copy_pool = gst_buffer_pool_new ();
+    config = gst_buffer_pool_get_config (fdpay->copy_pool);
+    gst_buffer_pool_config_set_params (config, NULL, pool_size, 0, 0);
+    gst_buffer_pool_config_set_allocator (config, fdpay->allocator, NULL);
+    if (!gst_buffer_pool_set_config (fdpay->copy_pool, config) ||
+        !gst_buffer_pool_set_active (fdpay->copy_pool, TRUE)) {
+      GST_ERROR_OBJECT (fdpay, "Failed to configure copy pool");
+      g_clear_object (&fdpay->copy_pool);
+      return NULL;
+    }
+    fdpay->copy_pool_size = pool_size;
+  }
+
+  if (gst_buffer_pool_acquire_buffer (fdpay->copy_pool, &copy, NULL) !=
+      GST_FLOW_OK) {
+    GST_ERROR_OBJECT (fdpay, "Failed to acquire buffer from copy pool");
+    return NULL;
+  }
+  gst_buffer_fill (copy, 0, data, size);
+  gst_buffer_set_size (copy, size);
+  return copy;
+}
+
+/* Raw audio and video come in buffers of the same size over and over, so
+ * it's worth recycling the memory we copy them into.  Encoded data varies in
+ * size and receivers may hold on to lots of it, so we don't. */
+static gboolean
+gst_fdpay_is_raw (GstFdpay * fdpay)
+{
+  GstCaps *caps;
+  const gchar *name;
+  gboolean raw = FALSE;
+
+  caps = gst_pad_get_current_caps (GST_BASE_TRANSFORM_SINK_PAD (fdpay));
+  if (caps && gst_caps_get_size (caps) > 0) {
+    name = gst_structure_get_name (gst_caps_get_structure (caps, 0));
+    raw = g_str_equal (name, "video/x-raw") || g_str_equal (name, "audio/x-raw");
+  }
+  if (caps)
+    gst_caps_unref (caps);
+  return raw;
+}
+
+/* Returns the fd memory to send and sets *hold to the buffer that we need to
+ * keep alive until the receiver is done with it.  *may_repeat is set if the
+ * memory belongs to a buffer pool, so we may send it again. */
 static GstMemory *
-gst_fdpay_get_fd_memory (GstFdpay * tmpfilepay, GstBuffer * buffer,
-    gboolean * may_repeat)
+gst_fdpay_get_fd_memory (GstFdpay * fdpay, GstBuffer * buffer,
+    gboolean * may_repeat, GstBuffer ** hold)
 {
   GstMemory *out = NULL;
+  GstMapInfo src_info;
+  GstBuffer *copy;
 
-  *may_repeat = TRUE;
   if (gst_buffer_n_memory (buffer) == 1
       && gst_is_fd_memory (gst_buffer_peek_memory (buffer, 0))) {
-    out = gst_buffer_get_memory (buffer, 0);
-  } else {
-    *may_repeat = FALSE;
-    GstMapInfo src_info;
-    GST_INFO_OBJECT (tmpfilepay, "Buffer cannot be payloaded without copying");
-    if (!gst_buffer_map (buffer, &src_info, GST_MAP_READ)) {
-      GST_ERROR_OBJECT (tmpfilepay, "Failed to map input buffer");
-      goto out;
-    }
-
-    out = gst_tmpfile_allocator_copy_alloc(tmpfilepay->allocator,
-        src_info.data, src_info.size);
-    if (out == NULL)
-      GST_ERROR_OBJECT (tmpfilepay, "Failed to create new GstMemory");
-
-    gst_buffer_unmap (buffer, &src_info);
+    *may_repeat = buffer->pool != NULL;
+    *hold = gst_buffer_ref (buffer);
+    return gst_buffer_get_memory (buffer, 0);
   }
-out:
+
+  GST_LOG_OBJECT (fdpay, "Buffer cannot be payloaded without copying");
+  if (!gst_buffer_map (buffer, &src_info, GST_MAP_READ)) {
+    GST_ERROR_OBJECT (fdpay, "Failed to map input buffer");
+    return NULL;
+  }
+  if (gst_fdpay_is_raw (fdpay)) {
+    copy = gst_fdpay_copy_to_pool (fdpay, src_info.data, src_info.size);
+    gst_buffer_unmap (buffer, &src_info);
+    if (copy == NULL)
+      return NULL;
+    out = gst_buffer_get_memory (copy, 0);
+    *may_repeat = TRUE;
+    *hold = copy;
+  } else {
+    out = gst_tmpfile_allocator_copy_alloc (fdpay->allocator, src_info.data,
+        src_info.size);
+    gst_buffer_unmap (buffer, &src_info);
+    if (out == NULL)
+      GST_ERROR_OBJECT (fdpay, "Failed to create new GstMemory");
+    *may_repeat = FALSE;
+    *hold = gst_buffer_ref (buffer);
+  }
   return out;
 }
 
@@ -413,6 +486,7 @@ gst_fdpay_transform (GstBaseTransform * trans, GstBuffer * inbuf,
   GSocketControlMessage *fdmsg = NULL;
   FDMessage msg = { 0, 0, 0, 0 };
   gboolean may_repeat;
+  GstBuffer *hold = NULL;
   GstClockTime pipeline_clock_time;
   int pipe_fds[2];
 
@@ -420,7 +494,7 @@ gst_fdpay_transform (GstBaseTransform * trans, GstBuffer * inbuf,
 
   gst_fdpay_free_buffers (fdpay);
 
-  fdmem = gst_fdpay_get_fd_memory (fdpay, inbuf, &may_repeat);
+  fdmem = gst_fdpay_get_fd_memory (fdpay, inbuf, &may_repeat, &hold);
   if (fdmem == NULL) {
     GST_ERROR_OBJECT (fdpay, "Failed to get fd memory for buffer");
     return GST_FLOW_ERROR;
@@ -441,6 +515,7 @@ gst_fdpay_transform (GstBaseTransform * trans, GstBuffer * inbuf,
   if (pipe (pipe_fds) == -1) {
     GST_WARNING_OBJECT (trans, "Failed to create pipe: %s", g_strerror (errno));
     g_clear_object (&fdmsg);
+    g_clear_pointer (&hold, gst_buffer_unref);
     return GST_FLOW_ERROR;
   }
 
@@ -463,7 +538,8 @@ gst_fdpay_transform (GstBaseTransform * trans, GstBuffer * inbuf,
   /* Store mapping of write fd to buffer for later lifecycle tracking */
   g_mutex_lock (&fdpay->pipe_write_fds_lock);
   g_hash_table_insert (fdpay->pipe_write_fds, GINT_TO_POINTER (pipe_fds[1]),
-      gst_buffer_ref (inbuf));
+      hold);
+  hold = NULL;
   pipe_fds[1] = -1; /* ownership transferred to hash table */
   g_mutex_unlock (&fdpay->pipe_write_fds_lock);
 
@@ -503,6 +579,7 @@ gst_fdpay_transform (GstBaseTransform * trans, GstBuffer * inbuf,
   return GST_FLOW_OK;
 append_pipe_fd_failed:
   GST_WARNING_OBJECT (trans, "Appending pipe fd failed: %s", err->message);
+  g_clear_pointer (&hold, gst_buffer_unref);
   close (pipe_fds[0]);
   close (pipe_fds[1]);
   g_clear_error (&err);
@@ -510,6 +587,7 @@ append_pipe_fd_failed:
   return GST_FLOW_ERROR;
 append_fd_failed:
   GST_WARNING_OBJECT (trans, "Appending fd failed: %s", err->message);
+  g_clear_pointer (&hold, gst_buffer_unref);
   gst_memory_unref(fdmem);
   g_clear_error (&err);
   g_clear_object (&fdmsg);

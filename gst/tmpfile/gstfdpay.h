@@ -44,6 +44,12 @@ struct _GstFdpay
 
   /* epoll fd for monitoring pipe write ends */
   int epoll_fd;
+
+  /* Pool of tmpfile-backed buffers that we copy into when we can't send our
+   * input buffer's memory directly.  Recycling them means receivers can keep
+   * them mapped. */
+  GstBufferPool *copy_pool;
+  gsize copy_pool_size;
 };
 
 struct _GstFdpayClass
