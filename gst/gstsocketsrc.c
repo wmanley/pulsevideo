@@ -83,8 +83,8 @@ G_DEFINE_TYPE (GstSocketSrc, gst_socket_src, GST_TYPE_PUSH_SRC);
 
 static void gst_socket_src_finalize (GObject * gobject);
 
-static GstFlowReturn gst_socket_src_fill (GstPushSrc * psrc,
-    GstBuffer * outbuf);
+static GstFlowReturn gst_socket_src_create (GstPushSrc * psrc,
+    GstBuffer ** outbuf);
 static gboolean gst_socket_src_unlock (GstBaseSrc * bsrc);
 static gboolean gst_socket_src_unlock_stop (GstBaseSrc * bsrc);
 
@@ -134,7 +134,7 @@ gst_socket_src_class_init (GstSocketSrcClass * klass)
   gstbasesrc_class->unlock = gst_socket_src_unlock;
   gstbasesrc_class->unlock_stop = gst_socket_src_unlock_stop;
 
-  gstpush_src_class->fill = gst_socket_src_fill;
+  gstpush_src_class->create = gst_socket_src_create;
 
   GST_DEBUG_CATEGORY_INIT (socketsrc_debug, "socketsrc", 0, "Socket Source");
 }
@@ -157,24 +157,26 @@ gst_socket_src_finalize (GObject * gobject)
   if (this->socket)
     g_object_unref (this->socket);
   this->socket = NULL;
+  g_clear_pointer (&this->scratch, g_free);
+  this->scratch_size = 0;
 
   G_OBJECT_CLASS (parent_class)->finalize (gobject);
 }
 
 static GstFlowReturn
-gst_socket_src_fill (GstPushSrc * psrc, GstBuffer * outbuf)
+gst_socket_src_create (GstPushSrc * psrc, GstBuffer ** outbuf)
 {
   GstSocketSrc *src;
   GstFlowReturn ret = GST_FLOW_OK;
   gssize rret;
   GError *err = NULL;
-  GstMapInfo map;
   GSocket *socket = NULL;
   GSocketControlMessage **messages = NULL;
   gint num_messages = 0;
   gint i;
   GInputVector ivec;
   gint flags = 0;
+  gsize blocksize;
 
   src = GST_SOCKET_SRC (psrc);
 
@@ -190,21 +192,31 @@ gst_socket_src_fill (GstPushSrc * psrc, GstBuffer * outbuf)
 
   GST_LOG_OBJECT (src, "asked for a buffer");
 
+  blocksize = gst_base_src_get_blocksize (GST_BASE_SRC (src));
+  if (src->scratch_size != blocksize) {
+    g_free (src->scratch);
+    src->scratch = g_malloc (blocksize);
+    src->scratch_size = blocksize;
+  }
+
 retry:
-  gst_buffer_map (outbuf, &map, GST_MAP_READWRITE);
-  ivec.buffer = map.data;
-  ivec.size = map.size;
+  flags = 0;
+  ivec.buffer = src->scratch;
+  ivec.size = src->scratch_size;
   rret =
       g_socket_receive_message (socket, NULL, &ivec, 1, &messages,
       &num_messages, &flags, src->cancellable, &err);
-  gst_buffer_unmap (outbuf, &map);
 
-  for (i = 0; i < num_messages; i++) {
-    gst_buffer_add_net_control_message_meta (outbuf, messages[i]);
-    g_object_unref (messages[i]);
-    messages[i] = NULL;
+  if (rret > 0 && !(flags & MSG_TRUNC)) {
+    *outbuf = gst_buffer_new_allocate (NULL, rret, NULL);
+    gst_buffer_fill (*outbuf, 0, src->scratch, rret);
+    for (i = 0; i < num_messages; i++)
+      gst_buffer_add_net_control_message_meta (*outbuf, messages[i]);
   }
-  g_free (messages);
+  for (i = 0; i < num_messages; i++)
+    g_object_unref (messages[i]);
+  g_clear_pointer (&messages, g_free);
+  num_messages = 0;
 
   if (rret == 0) {
     GSocket *tmp = NULL;
@@ -251,19 +263,13 @@ retry:
     ret = GST_FLOW_ERROR;
     GST_ELEMENT_ERROR (src, RESOURCE, READ, (NULL),
         ("Message from socket was truncated: buffer of %" G_GSIZE_FORMAT
-            " bytes is too small", gst_buffer_get_size (outbuf)));
+            " bytes is too small", src->scratch_size));
   } else {
     ret = GST_FLOW_OK;
-    gst_buffer_resize (outbuf, 0, rret);
 
     GST_LOG_OBJECT (src,
-        "Returning buffer from _get of size %" G_GSIZE_FORMAT ", ts %"
-        GST_TIME_FORMAT ", dur %" GST_TIME_FORMAT
-        ", offset %" G_GINT64_FORMAT ", offset_end %" G_GINT64_FORMAT,
-        gst_buffer_get_size (outbuf),
-        GST_TIME_ARGS (GST_BUFFER_TIMESTAMP (outbuf)),
-        GST_TIME_ARGS (GST_BUFFER_DURATION (outbuf)),
-        GST_BUFFER_OFFSET (outbuf), GST_BUFFER_OFFSET_END (outbuf));
+        "Returning buffer from _get of size %" G_GSIZE_FORMAT,
+        gst_buffer_get_size (*outbuf));
   }
 
   g_clear_error (&err);

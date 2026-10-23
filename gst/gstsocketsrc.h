@@ -50,6 +50,11 @@ struct _GstSocketSrc {
  /*< private >*/
   GSocket *socket;
   GCancellable *cancellable;
+
+  /* We receive into this and then copy into a buffer of the right size, so
+   * we don't hold on to blocksize bytes for every small message */
+  guint8 *scratch;
+  gsize scratch_size;
 };
 
 struct _GstSocketSrcClass {
