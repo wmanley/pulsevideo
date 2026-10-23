@@ -172,9 +172,19 @@ def test_with_dbus(tmpdir):
             stdout=subprocess.PIPE)
         fc = FrameCounter(gst_launch.stdout)
         fc.start()
+
+        # Don't start the clock until frames are actually flowing: starting
+        # gst-launch, scanning the GStreamer registry and activating
+        # pulsevideo over DBus can take most of a second on a cold CI
+        # runner, which would otherwise eat the measurement window.
+        assert wait_until(lambda: fc.count > 0), "No frames received"
+
+        start_count, start_time = fc.count, time.time()
         time.sleep(1)
-        count = fc.count
-        assert count >= 5 and count <= 15
+        fps = (fc.count - start_count) / (time.time() - start_time)
+
+        # The caps say framerate=10/1:
+        assert 5 <= fps <= 15
 
 
 def wait_until(f, timeout_secs=10):
