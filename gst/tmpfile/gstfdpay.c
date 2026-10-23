@@ -319,6 +319,10 @@ gst_fdpay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
   GST_DEBUG_OBJECT (fdpay, "transform_ip");
 
   fdmem = gst_fdpay_get_fd_memory (fdpay, buf);
+  if (fdmem == NULL) {
+    GST_ERROR_OBJECT (fdpay, "Failed to get fd memory for buffer");
+    return GST_FLOW_ERROR;
+  }
   gst_buffer_remove_all_memory (buf);
 
   msg.size = fdmem->size;
