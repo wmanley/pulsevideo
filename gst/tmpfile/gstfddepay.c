@@ -70,11 +70,13 @@ static gboolean gst_fddepay_stop (GstBaseTransform * trans);
 static GQuark pipe_read_fd_quark;
 
 /* Forget about memfds that we haven't received for this many messages.  The
- * sender recycles a small pool of buffers, so in steady state we see each one
- * every few frames.  If the sender has freed a buffer, or isn't using a pool at
- * all, we don't want to keep lots of memory alive.  A miss costs an mmap.
+ * sender recycles a pool of buffers, so in steady state we see each one every
+ * few frames, but a client that holds on to frames (like stbt) makes the pool
+ * bigger.  We don't want to keep memory alive for long after the sender has
+ * freed a buffer.  A miss costs an mmap.  One-off copies aren't cached at all
+ * (see FD_MESSAGE_FLAG_MAY_REPEAT).
  * Can be overridden with $PULSEVIDEO_FDDEPAY_CACHE_MESSAGES. */
-static guint64 fd_cache_evict_after_messages = 16;
+static guint64 fd_cache_evict_after_messages = 100;
 
 typedef struct
 {
@@ -238,11 +240,21 @@ gst_fddepay_stop (GstBaseTransform * trans)
 /* Takes ownership of fd */
 static GstMemory *
 gst_fddepay_get_memory (GstFddepay * fddepay, int fd,
-    const struct stat *statbuf, guint64 offset, guint64 size)
+    const struct stat *statbuf, guint64 offset, guint64 size,
+    gboolean may_repeat)
 {
   FdCacheKey key = { statbuf->st_dev, statbuf->st_ino };
   FdCacheEntry *entry;
   GstMemory *mem;
+
+  if (!may_repeat) {
+    /* A one-off copy: there's no point caching it */
+    mem = gst_fd_allocator_alloc (fddepay->fd_allocator, fd,
+        offset + size, GST_FD_MEMORY_FLAG_KEEP_MAPPED);
+    gst_memory_resize (mem, offset, size);
+    GST_MINI_OBJECT_FLAG_SET (mem, GST_MEMORY_FLAG_READONLY);
+    return mem;
+  }
 
   entry = g_hash_table_lookup (fddepay->fd_cache, &key);
   if (entry && entry->mem->maxsize < offset + size) {
@@ -396,7 +408,7 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
     goto error;
   }
   fdmem = gst_fddepay_get_memory (fddepay, fd, &statbuf, msg.offset,
-      msg.size);
+      msg.size, (msg.flags & FD_MESSAGE_FLAG_MAY_REPEAT) != 0);
   fd = -1;
 
   gst_buffer_remove_all_memory (buf);

@@ -315,9 +315,8 @@ GST_START_TEST (test_that_zerocopy_doesnt_leak_fds)
      allocate all those fds that will be reused for the lifetime of the
      pipeline.  I have to run this twice becuase the first buffer and the last
      two buffers are remembered.  I'm not quite sure why the first one is
-     remembered.  fddepay also caches the fds of the last 16 messages it
-     received. */
-  for (i = 0; i < 20; i++) {
+     remembered */
+  for (i = 0; i < 3; i++) {
     symmetry_test_assert_passthrough (&st,
         gst_buffer_new_wrapped (g_strdup ("hello"), 5));
   }
@@ -434,7 +433,7 @@ check_monotonic_timestamp_with_clock(GstClock * clock)
 {
   GstPipeline * pipeline = NULL;
   GstSample * sample = NULL;
-  guint64 header[3];
+  guint64 header[4];
   guint64 before, after;
   struct timespec ts;
 
@@ -458,8 +457,8 @@ check_monotonic_timestamp_with_clock(GstClock * clock)
 
   /* Now we check the data */
   fail_unless_equals_uint64 (
-      gst_buffer_get_size (gst_sample_get_buffer (sample)), 8*3);
-  gst_buffer_extract (gst_sample_get_buffer (sample), 0, header, 8*3);
+      gst_buffer_get_size (gst_sample_get_buffer (sample)), 8*4);
+  gst_buffer_extract (gst_sample_get_buffer (sample), 0, header, 8*4);
   gst_sample_unref (sample);
   sample = NULL;
 
@@ -469,6 +468,8 @@ check_monotonic_timestamp_with_clock(GstClock * clock)
 
   fail_unless (header[1] == 0);  /* offset */
   fail_unless (header[2] == 5);  /* size */
+  /* A one-off copy, because "hello" wasn't in fd memory */
+  fail_unless (header[3] == 0);  /* flags */
 }
 
 GST_START_TEST (test_that_fdpay_attaches_a_monotonic_timestamp)

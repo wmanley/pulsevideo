@@ -370,18 +370,20 @@ gst_fdpay_set_clock (GstElement * element, GstClock * clock)
       clock);
 }
 
+/* Sets *may_repeat to FALSE if the returned memory is a fresh copy that we'll
+ * never send again */
 static GstMemory *
-gst_fdpay_get_fd_memory (GstFdpay * tmpfilepay, GstBuffer * buffer)
+gst_fdpay_get_fd_memory (GstFdpay * tmpfilepay, GstBuffer * buffer,
+    gboolean * may_repeat)
 {
   GstMemory *out = NULL;
 
+  *may_repeat = TRUE;
   if (gst_buffer_n_memory (buffer) == 1
       && gst_is_fd_memory (gst_buffer_peek_memory (buffer, 0))) {
     out = gst_buffer_get_memory (buffer, 0);
-    /* The fd is about to escape this process, so the memory must never be
-     * reused.  This makes the buffer pool discard the buffer on release. */
-    GST_BUFFER_FLAG_SET (buffer, GST_BUFFER_FLAG_TAG_MEMORY);
   } else {
+    *may_repeat = FALSE;
     GstMapInfo src_info;
     GST_INFO_OBJECT (tmpfilepay, "Buffer cannot be payloaded without copying");
     if (!gst_buffer_map (buffer, &src_info, GST_MAP_READ)) {
@@ -409,7 +411,8 @@ gst_fdpay_transform (GstBaseTransform * trans, GstBuffer * inbuf,
   GstMapInfo info;
   GError *err = NULL;
   GSocketControlMessage *fdmsg = NULL;
-  FDMessage msg = { 0, 0, 0 };
+  FDMessage msg = { 0, 0, 0, 0 };
+  gboolean may_repeat;
   GstClockTime pipeline_clock_time;
   int pipe_fds[2];
 
@@ -417,13 +420,14 @@ gst_fdpay_transform (GstBaseTransform * trans, GstBuffer * inbuf,
 
   gst_fdpay_free_buffers (fdpay);
 
-  fdmem = gst_fdpay_get_fd_memory (fdpay, inbuf);
+  fdmem = gst_fdpay_get_fd_memory (fdpay, inbuf, &may_repeat);
   if (fdmem == NULL) {
     GST_ERROR_OBJECT (fdpay, "Failed to get fd memory for buffer");
     return GST_FLOW_ERROR;
   }
 
   msg.size = fdmem->size;
+  msg.flags = may_repeat ? FD_MESSAGE_FLAG_MAY_REPEAT : 0;
   msg.offset = fdmem->offset;
 
   fdmsg = g_unix_fd_message_new ();

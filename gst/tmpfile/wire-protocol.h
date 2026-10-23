@@ -53,6 +53,13 @@ typedef struct {
   uint64_t capture_timestamp;
   uint64_t offset;
   uint64_t size;
+  /* FD_MESSAGE_FLAG_* */
+  uint64_t flags;
 } FDMessage;
+
+/* The memfd may be sent again in a later message (e.g. it's from a buffer
+ * pool), so it's worth the receiver keeping it mapped.  If not set the memfd
+ * is a one-off copy. */
+#define FD_MESSAGE_FLAG_MAY_REPEAT 1
 
 #endif
