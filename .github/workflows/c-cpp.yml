@@ -30,7 +30,7 @@ jobs:
         gstreamer1.0-tools
         python-dbus
         python-pytest
-        python-pytest-xdist
+        python-pytest-forked
         python-subprocess32
     - name: make check
       continue-on-error: true
