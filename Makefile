@@ -110,7 +110,7 @@ shell:
 	    /bin/bash
 
 common/ :
-	git clone git://anongit.freedesktop.org/gstreamer/common common
+	git clone https://gitlab.freedesktop.org/gstreamer/common.git common
 
 # Can only be run from within a git clone of pulsevideo or VERSION (and the
 # list of files) won't be set correctly.
