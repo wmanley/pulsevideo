@@ -37,6 +37,13 @@ struct _GstFdpay
   GstAllocator * allocator;
 
   GstClock *monotonic_clock;
+
+  /* Hash table mapping write end of pipe (int) to GstBuffer */
+  GHashTable *pipe_write_fds;
+  GMutex pipe_write_fds_lock;
+
+  /* epoll fd for monitoring pipe write ends */
+  int epoll_fd;
 };
 
 struct _GstFdpayClass

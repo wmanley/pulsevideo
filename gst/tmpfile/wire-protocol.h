@@ -22,9 +22,28 @@
 
 #include <stdint.h>
 
-/* Almost the simplest possible FD passing protocol.  Each message should have
- * a file-descriptor attached which should be mmapable.  The data in the FD can
- * be found at offset and is size bytes long. */
+/* A simple FD passing protocol.  Each message should have two file-descriptors
+ * attached:
+ *
+ * 1. A memfd (or file) which should be mmapable.  The data in the FD can
+ *    be found at offset and is size bytes long.
+ * 2. The read end of a pipe which should be closed when the receiver is done
+ *    with the data in the memfd.
+ *
+ * On the sender side there is a gstreamer element named fdpay.  It proposes a
+ * bufferpool upstream which allocates memfd backing memory for upstream
+ * elements.  When it receives a buffer from upstream it uses `pipe` to create a
+ * new pair of file descriptors.  It adds the write end of the pipe (wfd) to an
+ * epoll instance and sends the memfd and the read end of the pipe downstream.
+ * It keeps a mapping of wfd to GstBuffer.  When the read end is closed by the
+ * receiver, the sender receives an event on the epoll instance and will then
+ * remove the entry in the map, allowing the buffer to be reused.
+ *
+ * On the reciever side there is an element called fddepay.  This element
+ * receives the memfd and the read end of the pipe.  It creates a GstFdMemory
+ * which maps the memfd.  It creates downstream buffers with the pipe attached,
+ * and closes the pipe when the buffer is freed.
+ */
 typedef struct {
   /* Time at which the frame was originally captured against the CLOCK_MONOTONIC
    * in ns */

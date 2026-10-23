@@ -65,6 +65,17 @@ static void gst_fddepay_dispose (GObject * object);
 static GstFlowReturn gst_fddepay_transform_ip (GstBaseTransform * trans,
     GstBuffer * buf);
 
+static GQuark pipe_read_fd_quark;
+
+static void
+gst_fddepay_close_pipe_fd (gpointer data)
+{
+  int fd = GPOINTER_TO_INT (data);
+  if (fd >= 0) {
+    close (fd);
+  }
+}
+
 /* pad templates */
 
 static GstStaticCaps fd_caps = GST_STATIC_CAPS ("application/x-fd");
@@ -115,6 +126,7 @@ gst_fddepay_class_init (GstFddepayClass * klass)
   base_transform_class->transform_ip =
       GST_DEBUG_FUNCPTR (gst_fddepay_transform_ip);
 
+  pipe_read_fd_quark = g_quark_from_static_string ("gst-fddepay-pipe-read-fd");
 }
 
 static void
@@ -210,6 +222,7 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
   GstNetControlMessageMeta * meta;
   GUnixFDList *fds = NULL;
   int fd = -1;
+  int pipe_read_fd = -1;
   struct stat statbuf;
   GstClockTime pipeline_clock_time, running_time;
 
@@ -235,13 +248,14 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
     meta = NULL;
   }
 
-  if (g_unix_fd_list_get_length (fds) != 1) {
-    GST_WARNING_OBJECT (fddepay, "fddepay: Expect to receive 1 FD for each "
-        "buffer, received %i", g_unix_fd_list_get_length (fds));
+  if (g_unix_fd_list_get_length (fds) != 2) {
+    GST_WARNING_OBJECT (fddepay, "fddepay: Expect to receive 2 FDs for each "
+        "buffer (memfd + pipe read end), received %i", g_unix_fd_list_get_length (fds));
     goto error;
   }
 
   fd = g_unix_fd_list_get (fds, 0, NULL);
+  pipe_read_fd = g_unix_fd_list_get (fds, 1, NULL);
   fds = NULL;
 
   if (fd == -1) {
@@ -302,9 +316,18 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
     GST_INFO_OBJECT (trans, "Can't apply timestamp to buffer: segment.format "
         "!= GST_FORMAT_TIME");
   }
+
+  /* Attach pipe_read_fd to buffer so it gets closed when buffer is destroyed */
+  if (pipe_read_fd >= 0) {
+    gst_mini_object_set_qdata (GST_MINI_OBJECT_CAST (buf), pipe_read_fd_quark,
+        GINT_TO_POINTER (pipe_read_fd), gst_fddepay_close_pipe_fd);
+  }
+
   return GST_FLOW_OK;
 error:
   if (fd >= 0)
     close (fd);
+  if (pipe_read_fd >= 0)
+    close (pipe_read_fd);
   return GST_FLOW_ERROR;
 }

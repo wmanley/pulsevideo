@@ -316,7 +316,7 @@ GST_START_TEST (test_that_zerocopy_doesnt_leak_fds)
      pipeline.  I have to run this twice becuase the first buffer and the last
      two buffers are remembered.  I'm not quite sure why the first one is
      remembered */
-  for (i = 0; i < 2; i++) {
+  for (i = 0; i < 3; i++) {
     symmetry_test_assert_passthrough (&st,
         gst_buffer_new_wrapped (g_strdup ("hello"), 5));
   }

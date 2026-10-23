@@ -56,6 +56,9 @@
 #include <fcntl.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
+#include <sys/epoll.h>
+#include <glib/gstdio.h>
 
 GST_DEBUG_CATEGORY_STATIC (gst_fdpay_debug_category);
 #define GST_CAT_DEFAULT gst_fdpay_debug_category
@@ -71,6 +74,7 @@ GST_DEBUG_CATEGORY_STATIC (gst_fdpay_debug_category);
 /* prototypes */
 
 static void gst_fdpay_dispose (GObject * object);
+static void gst_fdpay_free_buffers (GstFdpay * fdpay);
 
 static gboolean gst_fdpay_set_clock (GstElement * element, GstClock * clock);
 
@@ -140,6 +144,15 @@ gst_fdpay_class_init (GstFdpayClass * klass)
 }
 
 static void
+gst_fdpay_close_pipe_fd (gpointer data)
+{
+  int fd = GPOINTER_TO_INT (data);
+  if (fd >= 0) {
+    close (fd);
+  }
+}
+
+static void
 gst_fdpay_init (GstFdpay * fdpay)
 {
   GST_OBJECT_FLAG_SET (fdpay, GST_ELEMENT_FLAG_REQUIRE_CLOCK);
@@ -148,6 +161,59 @@ gst_fdpay_init (GstFdpay * fdpay)
   fdpay->monotonic_clock = g_object_new (GST_TYPE_SYSTEM_CLOCK,
       "clock-type", GST_CLOCK_TYPE_MONOTONIC, NULL);
   GST_OBJECT_FLAG_SET (fdpay->monotonic_clock, GST_CLOCK_FLAG_CAN_SET_MASTER);
+
+  g_mutex_init (&fdpay->pipe_write_fds_lock);
+  fdpay->pipe_write_fds = g_hash_table_new_full (g_direct_hash, g_direct_equal,
+      (GDestroyNotify) gst_fdpay_close_pipe_fd, (GDestroyNotify) gst_buffer_unref);
+
+  fdpay->epoll_fd = epoll_create1 (EPOLL_CLOEXEC);
+  if (fdpay->epoll_fd == -1) {
+    GST_WARNING_OBJECT (fdpay, "Failed to create epoll fd: %s",
+        g_strerror (errno));
+  }
+}
+
+static void
+gst_fdpay_free_buffers (GstFdpay * fdpay)
+{
+  struct epoll_event events[32];
+  int num_events;
+  int i;
+
+  if (fdpay->epoll_fd == -1) {
+    return;
+  }
+
+  /* Poll for events with zero timeout (non-blocking) */
+  num_events = epoll_wait (fdpay->epoll_fd, events, 32, 0);
+  if (num_events == -1) {
+    GST_WARNING_OBJECT (fdpay, "epoll_wait failed: %s", g_strerror (errno));
+    return;
+  }
+
+  /* Process each event */
+  g_mutex_lock (&fdpay->pipe_write_fds_lock);
+  for (i = 0; i < num_events; i++) {
+    int pipe_fd = events[i].data.fd;
+    
+    /* Check if this is an error or hangup event */
+    if (events[i].events & (EPOLLHUP | EPOLLERR)) {
+      GST_DEBUG_OBJECT (fdpay, "Pipe fd %d closed by receiver, removing from hash table",
+          pipe_fd);
+      
+      /* Remove the fd from epoll and the hash table */
+      if (epoll_ctl (fdpay->epoll_fd, EPOLL_CTL_DEL, pipe_fd, NULL) == -1) {
+        GST_WARNING_OBJECT (fdpay, "Failed to remove fd %d from epoll: %s",
+            pipe_fd, g_strerror (errno));
+      }
+      
+      /* Remove from hash table (this will also close the fd and unref the buffer) */
+      if (!g_hash_table_remove (fdpay->pipe_write_fds, GINT_TO_POINTER (pipe_fd))) {
+        GST_WARNING_OBJECT (fdpay, "Fd %d not found in hash table", pipe_fd);
+      }
+    }
+  }
+  g_mutex_unlock (&fdpay->pipe_write_fds_lock);
 }
 
 void
@@ -160,6 +226,17 @@ gst_fdpay_dispose (GObject * object)
   /* clean up as possible.  may be called multiple times */
   GST_UNREF(fdpay->allocator);
   GST_UNREF (fdpay->monotonic_clock);
+
+  if (fdpay->epoll_fd != -1) {
+    close (fdpay->epoll_fd);
+    fdpay->epoll_fd = -1;
+  }
+
+  if (fdpay->pipe_write_fds) {
+    g_hash_table_unref (fdpay->pipe_write_fds);
+    fdpay->pipe_write_fds = NULL;
+  }
+  g_mutex_clear (&fdpay->pipe_write_fds_lock);
 
   G_OBJECT_CLASS (gst_fdpay_parent_class)->dispose (object);
 }
@@ -334,8 +411,11 @@ gst_fdpay_transform (GstBaseTransform * trans, GstBuffer * inbuf,
   GSocketControlMessage *fdmsg = NULL;
   FDMessage msg = { 0, 0, 0 };
   GstClockTime pipeline_clock_time;
+  int pipe_fds[2];
 
   GST_DEBUG_OBJECT (fdpay, "transform");
+
+  gst_fdpay_free_buffers (fdpay);
 
   fdmem = gst_fdpay_get_fd_memory (fdpay, inbuf);
   if (fdmem == NULL) {
@@ -353,6 +433,35 @@ gst_fdpay_transform (GstBaseTransform * trans, GstBuffer * inbuf,
   }
   gst_memory_unref(fdmem);
   fdmem = NULL;
+
+  if (pipe (pipe_fds) == -1) {
+    GST_WARNING_OBJECT (trans, "Failed to create pipe: %s", g_strerror (errno));
+    g_clear_object (&fdmsg);
+    return GST_FLOW_ERROR;
+  }
+
+  if (!g_unix_fd_message_append_fd ((GUnixFDMessage*) fdmsg, pipe_fds[0], &err)) {
+    goto append_pipe_fd_failed;
+  }
+  close (pipe_fds[0]);
+
+  /* Register write end with epoll to detect when receiver closes read end (EPIPE) */
+  if (fdpay->epoll_fd != -1) {
+    struct epoll_event ev;
+    ev.events = EPOLLHUP | EPOLLERR;
+    ev.data.fd = pipe_fds[1];
+    if (epoll_ctl (fdpay->epoll_fd, EPOLL_CTL_ADD, pipe_fds[1], &ev) == -1) {
+      GST_WARNING_OBJECT (trans, "Failed to register fd with epoll: %s",
+          g_strerror (errno));
+    }
+  }
+
+  /* Store mapping of write fd to buffer for later lifecycle tracking */
+  g_mutex_lock (&fdpay->pipe_write_fds_lock);
+  g_hash_table_insert (fdpay->pipe_write_fds, GINT_TO_POINTER (pipe_fds[1]),
+      gst_buffer_ref (inbuf));
+  pipe_fds[1] = -1; /* ownership transferred to hash table */
+  g_mutex_unlock (&fdpay->pipe_write_fds_lock);
 
   gst_buffer_add_net_control_message_meta (outbuf, fdmsg);
   g_clear_object (&fdmsg);
@@ -388,6 +497,13 @@ gst_fdpay_transform (GstBaseTransform * trans, GstBuffer * inbuf,
       msg.size);
 
   return GST_FLOW_OK;
+append_pipe_fd_failed:
+  GST_WARNING_OBJECT (trans, "Appending pipe fd failed: %s", err->message);
+  close (pipe_fds[0]);
+  close (pipe_fds[1]);
+  g_clear_error (&err);
+  g_clear_object (&fdmsg);
+  return GST_FLOW_ERROR;
 append_fd_failed:
   GST_WARNING_OBJECT (trans, "Appending fd failed: %s", err->message);
   gst_memory_unref(fdmem);
