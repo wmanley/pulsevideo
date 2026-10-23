@@ -397,6 +397,21 @@ gst_pulsevideo_src_reinit (GstPulseVideoSrc * src, GCancellable* cancellable,
   caps = gst_caps_from_string (g_steal_pointer (&scaps));
   g_object_set (src->capsfilter, "caps", caps, NULL);
 
+  /* Nothing else in this bin ever sends caps: socketsrc's are ANY, so basesrc
+   * skips negotiation ("no negotiation needed") and no pad downstream of it
+   * has sink caps.  capsfilter makes up the caps for the whole chain in
+   * gst_capsfilter_prepare_buf(), but only while its src pad has none -- after
+   * that it reuses gst_pad_get_current_caps() and ignores the "caps" property
+   * we just set.  So replace them ourselves, otherwise rawvideovalidate keeps
+   * the caps from the previous connection and drops every buffer: */
+  {
+    GstPad *capsfilter_src =
+        gst_element_get_static_pad (src->capsfilter, "src");
+    if (gst_pad_has_current_caps (capsfilter_src))
+      gst_pad_push_event (capsfilter_src, gst_event_new_caps (caps));
+    gst_object_unref (capsfilter_src);
+  }
+
   GST_INFO_OBJECT (src, "Received remote caps %" GST_PTR_FORMAT, caps);
   gst_caps_unref (g_steal_pointer (&caps));
 
