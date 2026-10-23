@@ -34,5 +34,4 @@ jobs:
         python3-pytest-forked
         valgrind
     - name: make check
-      continue-on-error: true
       run: make check
