@@ -18,6 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
+#include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
 
@@ -27,6 +28,7 @@
 #include <gst/app/gstappsrc.h>
 #include <gio/gunixfdmessage.h>
 #include "../build/gstnetcontrolmessagemeta.h"
+#include "../build/tmpfile/wire-protocol.h"
 
 #include "sys/types.h"
 #include "sys/stat.h"
@@ -433,7 +435,8 @@ check_monotonic_timestamp_with_clock(GstClock * clock)
 {
   GstPipeline * pipeline = NULL;
   GstSample * sample = NULL;
-  guint64 header[4];
+  PvMessage header;
+  gchar payload[5];
   guint64 before, after;
   struct timespec ts;
 
@@ -455,22 +458,22 @@ check_monotonic_timestamp_with_clock(GstClock * clock)
 
   g_clear_object (&pipeline);
 
-  /* Now we check the data */
+  /* Now we check the data.  "hello" is small so it's sent inline: */
   fail_unless_equals_uint64 (
-      gst_buffer_get_size (gst_sample_get_buffer (sample)), 8*4);
-  gst_buffer_extract (gst_sample_get_buffer (sample), 0, header, 8*4);
+      gst_buffer_get_size (gst_sample_get_buffer (sample)),
+      sizeof (header) + 5);
+  gst_buffer_extract (gst_sample_get_buffer (sample), 0, &header,
+      sizeof (header));
+  gst_buffer_extract (gst_sample_get_buffer (sample), sizeof (header),
+      payload, 5);
   gst_sample_unref (sample);
   sample = NULL;
 
-  /* capture_timestamp */
-  fail_unless (header[0] >= before);
-  fail_unless (header[0] <= after);
-
-  fail_unless (header[1] == 0);  /* offset */
-  fail_unless (header[2] == 5);  /* size */
-  /* "hello" wasn't in fd memory and isn't raw audio/video, so fdpay made a
-   * one-off copy */
-  fail_unless (header[3] == 0);  /* flags */
+  fail_unless_equals_int (header.type, PV_MSG_INLINE_BUFFER);
+  fail_unless (header.capture_timestamp >= before);
+  fail_unless (header.capture_timestamp <= after);
+  fail_unless_equals_uint64 (header.size, 5);
+  fail_unless (memcmp (payload, "hello", 5) == 0);
 }
 
 GST_START_TEST (test_that_fdpay_attaches_a_monotonic_timestamp)
@@ -493,14 +496,18 @@ GST_START_TEST (test_that_buffers_from_fddepay_are_read_only)
   GstSample * sample;
   GstMemory * mem;
   GstMapInfo info;
+  GstBuffer * big;
 
   pipeline = GST_PIPELINE (gst_parse_launch (
       "appsrc name=src caps=application/x-gst-check "
       "! pvfdpay "
       "! pvfddepay "
       "! appsink name=sink caps=application/x-gst-check", NULL));
-  sample = send_buffer_through_pipeline (pipeline, gst_buffer_new_wrapped (
-      g_strdup ("hello"), 5));
+  /* Too big to be sent inline, so it's shared memory that other clients may
+   * also be reading: */
+  big = gst_buffer_new_allocate (NULL, PV_MSG_MAX_INLINE + 1, NULL);
+  gst_buffer_memset (big, 0, 'x', PV_MSG_MAX_INLINE + 1);
+  sample = send_buffer_through_pipeline (pipeline, big);
   g_clear_object (&pipeline);
 
   mem = gst_buffer_peek_memory (gst_sample_get_buffer(sample), 0);

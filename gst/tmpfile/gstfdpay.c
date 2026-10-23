@@ -280,7 +280,9 @@ gst_fdpay_transform_size (GstBaseTransform * trans, GstPadDirection direction,
     GstCaps * caps, gsize size, GstCaps * othercaps, gsize * othersize)
 {
   if (direction == GST_PAD_SINK) {
-    *othersize = sizeof (FDMessage);
+    *othersize = sizeof (PvMessage);
+    if (size <= PV_MSG_MAX_INLINE)
+      *othersize += size;
     return TRUE;
   } else {
     return FALSE;
@@ -475,6 +477,61 @@ gst_fdpay_get_fd_memory (GstFdpay * fdpay, GstBuffer * buffer,
   return out;
 }
 
+/* The time at which inbuf was captured against CLOCK_MONOTONIC */
+static guint64
+gst_fdpay_capture_timestamp (GstFdpay * fdpay, GstBuffer * inbuf)
+{
+  GstBaseTransform *trans = GST_BASE_TRANSFORM (fdpay);
+  GstClockTime pipeline_clock_time;
+  guint64 ts;
+
+  if (trans->segment.format != GST_FORMAT_TIME ||
+      !GST_CLOCK_TIME_IS_VALID (GST_BUFFER_PTS (inbuf)))
+    return 0;
+
+  pipeline_clock_time = GST_ELEMENT (trans)->base_time +
+      gst_segment_to_running_time (
+          &trans->segment, GST_FORMAT_TIME, GST_BUFFER_PTS (inbuf));
+  GST_OBJECT_LOCK (fdpay->monotonic_clock);
+  ts = gst_clock_unadjust_unlocked (fdpay->monotonic_clock,
+      pipeline_clock_time);
+  GST_OBJECT_UNLOCK (fdpay->monotonic_clock);
+  return ts;
+}
+
+static GstFlowReturn
+gst_fdpay_transform_inline (GstFdpay * fdpay, GstBuffer * inbuf,
+    GstBuffer * outbuf)
+{
+  PvMessage msg = { 0, };
+  GstMapInfo info;
+  gsize size = gst_buffer_get_size (inbuf);
+
+  msg.type = PV_MSG_INLINE_BUFFER;
+  msg.capture_timestamp = gst_fdpay_capture_timestamp (fdpay, inbuf);
+  msg.size = size;
+
+  if (!gst_buffer_map (outbuf, &info, GST_MAP_WRITE)) {
+    GST_WARNING_OBJECT (fdpay, "Failed to map output buffer for writing");
+    return GST_FLOW_ERROR;
+  }
+  if (info.size != sizeof (msg) + size) {
+    GST_WARNING_OBJECT (fdpay, "Output buffer is the wrong size (%"
+        G_GSIZE_FORMAT " != %" G_GSIZE_FORMAT ")", info.size,
+        sizeof (msg) + size);
+    gst_buffer_unmap (outbuf, &info);
+    return GST_FLOW_ERROR;
+  }
+  memcpy (info.data, &msg, sizeof (msg));
+  gst_buffer_extract (inbuf, 0, info.data + sizeof (msg), size);
+  gst_buffer_unmap (outbuf, &info);
+
+  GST_DEBUG_OBJECT (fdpay, "transform: Pushing inline {capture_timestamp: %"
+      G_GUINT64_FORMAT ", size: %" G_GUINT64_FORMAT "}",
+      msg.capture_timestamp, msg.size);
+  return GST_FLOW_OK;
+}
+
 static GstFlowReturn
 gst_fdpay_transform (GstBaseTransform * trans, GstBuffer * inbuf,
     GstBuffer * outbuf)
@@ -484,15 +541,20 @@ gst_fdpay_transform (GstBaseTransform * trans, GstBuffer * inbuf,
   GstMapInfo info;
   GError *err = NULL;
   GSocketControlMessage *fdmsg = NULL;
-  FDMessage msg = { 0, 0, 0, 0 };
+  PvMessage msg = { 0, };
   gboolean may_repeat;
   GstBuffer *hold = NULL;
-  GstClockTime pipeline_clock_time;
   int pipe_fds[2];
 
   GST_DEBUG_OBJECT (fdpay, "transform");
 
   gst_fdpay_free_buffers (fdpay);
+
+  if (gst_buffer_get_size (inbuf) <= PV_MSG_MAX_INLINE)
+    return gst_fdpay_transform_inline (fdpay, inbuf, outbuf);
+
+  msg.type = PV_MSG_FD_BUFFER;
+  msg.capture_timestamp = gst_fdpay_capture_timestamp (fdpay, inbuf);
 
   fdmem = gst_fdpay_get_fd_memory (fdpay, inbuf, &may_repeat, &hold);
   if (fdmem == NULL) {
@@ -501,7 +563,7 @@ gst_fdpay_transform (GstBaseTransform * trans, GstBuffer * inbuf,
   }
 
   msg.size = fdmem->size;
-  msg.flags = may_repeat ? FD_MESSAGE_FLAG_MAY_REPEAT : 0;
+  msg.flags = may_repeat ? PV_MSG_FLAG_MAY_REPEAT : 0;
   msg.offset = fdmem->offset;
 
   fdmsg = g_unix_fd_message_new ();
@@ -546,18 +608,6 @@ gst_fdpay_transform (GstBaseTransform * trans, GstBuffer * inbuf,
   gst_buffer_add_net_control_message_meta (outbuf, fdmsg);
   g_clear_object (&fdmsg);
 
-  if (trans->segment.format == GST_FORMAT_TIME &&
-      GST_CLOCK_TIME_IS_VALID (GST_BUFFER_PTS (inbuf))) {
-    pipeline_clock_time = GST_ELEMENT (trans)->base_time +
-        gst_segment_to_running_time (
-            &trans->segment, GST_FORMAT_TIME, GST_BUFFER_PTS (inbuf));
-    GST_OBJECT_LOCK (fdpay->monotonic_clock);
-    msg.capture_timestamp = gst_clock_unadjust_unlocked (
-        fdpay->monotonic_clock, pipeline_clock_time);
-    GST_OBJECT_UNLOCK (fdpay->monotonic_clock);
-  } else {
-    msg.capture_timestamp = 0;
-  }
   if (!gst_buffer_map (outbuf, &info, GST_MAP_WRITE)) {
     GST_ERROR_OBJECT (fdpay, "Failed to map output buffer");
     return GST_FLOW_ERROR;

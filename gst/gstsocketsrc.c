@@ -51,6 +51,8 @@
 #include "gstnetcontrolmessagemeta.h"
 #include "gstsocketsrc.h"
 
+#include <sys/socket.h>
+
 GST_DEBUG_CATEGORY_STATIC (socketsrc_debug);
 #define GST_CAT_DEFAULT socketsrc_debug
 
@@ -245,6 +247,11 @@ retry:
       GST_ELEMENT_ERROR (src, RESOURCE, READ, (NULL),
           ("Failed to read from socket: %s", err->message));
     }
+  } else if (flags & MSG_TRUNC) {
+    ret = GST_FLOW_ERROR;
+    GST_ELEMENT_ERROR (src, RESOURCE, READ, (NULL),
+        ("Message from socket was truncated: buffer of %" G_GSIZE_FORMAT
+            " bytes is too small", gst_buffer_get_size (outbuf)));
   } else {
     ret = GST_FLOW_OK;
     gst_buffer_resize (outbuf, 0, rret);

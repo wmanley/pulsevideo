@@ -74,7 +74,7 @@ static GQuark pipe_read_fd_quark;
  * few frames, but a client that holds on to frames (like stbt) makes the pool
  * bigger.  We don't want to keep memory alive for long after the sender has
  * freed a buffer.  A miss costs an mmap.  One-off copies aren't cached at all
- * (see FD_MESSAGE_FLAG_MAY_REPEAT).
+ * (see PV_MSG_FLAG_MAY_REPEAT).
  * Can be overridden with $PULSEVIDEO_FDDEPAY_CACHE_MESSAGES. */
 static guint64 fd_cache_evict_after_messages = 100;
 
@@ -343,31 +343,85 @@ gst_fddepay_set_clock (GstElement * element, GstClock * clock)
       clock);
 }
 
+static void
+gst_fddepay_set_pts (GstFddepay * fddepay, GstBuffer * buf,
+    guint64 capture_timestamp)
+{
+  GstBaseTransform *trans = GST_BASE_TRANSFORM (fddepay);
+  GstClockTime pipeline_clock_time, running_time;
+
+  if (trans->segment.format == GST_FORMAT_TIME) {
+    GST_OBJECT_LOCK (fddepay->monotonic_clock);
+    pipeline_clock_time = gst_clock_adjust_unlocked (fddepay->monotonic_clock,
+        capture_timestamp);
+    GST_OBJECT_UNLOCK (fddepay->monotonic_clock);
+    if (GST_ELEMENT (trans)->base_time < pipeline_clock_time) {
+      running_time = pipeline_clock_time - GST_ELEMENT (trans)->base_time;
+    } else {
+      GST_INFO_OBJECT (trans, "base time < clock time! %" GST_TIME_FORMAT " < "
+          "%" GST_TIME_FORMAT, GST_TIME_ARGS (GST_ELEMENT (trans)->base_time),
+          GST_TIME_ARGS (pipeline_clock_time));
+      running_time = 0;
+    }
+    GST_BUFFER_PTS (buf) = gst_segment_to_position (
+        &trans->segment, GST_FORMAT_TIME, running_time);
+
+    GST_DEBUG_OBJECT (trans, "CLOCK_MONOTONIC capture timestamp %"
+        GST_TIME_FORMAT " -> pipeline clock time %" GST_TIME_FORMAT " -> "
+        "running time %" GST_TIME_FORMAT " -> PTS %" GST_TIME_FORMAT,
+        GST_TIME_ARGS (capture_timestamp),
+        GST_TIME_ARGS (pipeline_clock_time), GST_TIME_ARGS (running_time),
+        GST_TIME_ARGS (GST_BUFFER_PTS (buf)));
+
+  } else {
+    GST_INFO_OBJECT (trans, "Can't apply timestamp to buffer: segment.format "
+        "!= GST_FORMAT_TIME");
+  }
+}
+
 static GstFlowReturn
 gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
 {
   GstFddepay *fddepay = GST_FDDEPAY (trans);
-  FDMessage msg;
+  PvMessage msg;
   GstMemory *fdmem = NULL;
   GstNetControlMessageMeta * meta;
   GUnixFDList *fds = NULL;
   int fd = -1;
   int pipe_read_fd = -1;
   struct stat statbuf;
-  GstClockTime pipeline_clock_time, running_time;
 
   GST_DEBUG_OBJECT (fddepay, "transform_ip");
 
-  if (gst_buffer_get_size (buf) != sizeof (msg)) {
-    /* We're guaranteed that we can't `read` from a socket across an attached
-     * file descriptor so we should get the data in chunks no bigger than
-     * sizeof(FDMessage) */
-    GST_WARNING_OBJECT (fddepay, "fddepay: Received wrong amount of data "
-        "between fds.");
+  if (gst_buffer_get_size (buf) < sizeof (msg)) {
+    GST_WARNING_OBJECT (fddepay, "fddepay: Message too short (%" G_GSIZE_FORMAT
+        " bytes)", gst_buffer_get_size (buf));
     goto error;
   }
-
   gst_buffer_extract (buf, 0, &msg, sizeof (msg));
+
+  if (msg.type == PV_MSG_INLINE_BUFFER) {
+    if (gst_buffer_get_size (buf) != sizeof (msg) + msg.size) {
+      GST_WARNING_OBJECT (fddepay, "fddepay: Inline message is the wrong size "
+          "(%" G_GSIZE_FORMAT " != %" G_GSIZE_FORMAT " + %" G_GUINT64_FORMAT
+          ")", gst_buffer_get_size (buf), sizeof (msg), msg.size);
+      goto error;
+    }
+    gst_buffer_resize (buf, sizeof (msg), msg.size);
+    gst_fddepay_set_pts (fddepay, buf, msg.capture_timestamp);
+    return GST_FLOW_OK;
+  }
+
+  if (msg.type != PV_MSG_FD_BUFFER) {
+    GST_WARNING_OBJECT (fddepay, "fddepay: Unknown message type %u", msg.type);
+    goto error;
+  }
+  if (gst_buffer_get_size (buf) != sizeof (msg)) {
+    GST_WARNING_OBJECT (fddepay, "fddepay: FD message is the wrong size (%"
+        G_GSIZE_FORMAT " != %" G_GSIZE_FORMAT ")", gst_buffer_get_size (buf),
+        sizeof (msg));
+    goto error;
+  }
 
   meta = ((GstNetControlMessageMeta*) gst_buffer_get_meta (
       buf, GST_NET_CONTROL_MESSAGE_META_API_TYPE));
@@ -408,7 +462,7 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
     goto error;
   }
   fdmem = gst_fddepay_get_memory (fddepay, fd, &statbuf, msg.offset,
-      msg.size, (msg.flags & FD_MESSAGE_FLAG_MAY_REPEAT) != 0);
+      msg.size, (msg.flags & PV_MSG_FLAG_MAY_REPEAT) != 0);
   fd = -1;
 
   gst_buffer_remove_all_memory (buf);
@@ -417,33 +471,7 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
   gst_buffer_append_memory (buf, fdmem);
   fdmem = NULL;
 
-  if (trans->segment.format == GST_FORMAT_TIME) {
-    GST_OBJECT_LOCK (fddepay->monotonic_clock);
-    pipeline_clock_time = gst_clock_adjust_unlocked (fddepay->monotonic_clock,
-        msg.capture_timestamp);
-    GST_OBJECT_UNLOCK (fddepay->monotonic_clock);
-    if (GST_ELEMENT (trans)->base_time < pipeline_clock_time) {
-      running_time = pipeline_clock_time - GST_ELEMENT (trans)->base_time;
-    } else {
-      GST_INFO_OBJECT (trans, "base time < clock time! %" GST_TIME_FORMAT " < "
-          "%" GST_TIME_FORMAT, GST_TIME_ARGS (GST_ELEMENT (trans)->base_time),
-          GST_TIME_ARGS (pipeline_clock_time));
-      running_time = 0;
-    }
-    GST_BUFFER_PTS (buf) = gst_segment_to_position (
-        &trans->segment, GST_FORMAT_TIME, running_time);
-
-    GST_DEBUG_OBJECT (trans, "CLOCK_MONOTONIC capture timestamp %"
-        GST_TIME_FORMAT " -> pipeline clock time %" GST_TIME_FORMAT " -> "
-        "running time %" GST_TIME_FORMAT " -> PTS %" GST_TIME_FORMAT,
-        GST_TIME_ARGS (msg.capture_timestamp),
-        GST_TIME_ARGS (pipeline_clock_time), GST_TIME_ARGS (running_time),
-        GST_TIME_ARGS (GST_BUFFER_PTS (buf)));
-
-  } else {
-    GST_INFO_OBJECT (trans, "Can't apply timestamp to buffer: segment.format "
-        "!= GST_FORMAT_TIME");
-  }
+  gst_fddepay_set_pts (fddepay, buf, msg.capture_timestamp);
 
   /* Attach pipe_read_fd to buffer so it gets closed when buffer is destroyed */
   if (pipe_read_fd >= 0) {

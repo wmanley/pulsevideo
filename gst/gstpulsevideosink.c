@@ -343,7 +343,9 @@ on_handle_attach (GstVideoSource2         *interface,
 
   GST_DEBUG_OBJECT (sink, "Attaching client");
 
-  error = socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds);
+  /* SOCK_SEQPACKET so each fdpay message arrives as a single packet (see
+   * wire-protocol.h) */
+  error = socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, fds);
   if (error) {
     g_set_error (&gerror, G_IO_ERROR, g_io_error_from_errno (errno),
         "socketpair failed with errno %i (%s)", errno, strerror(errno));

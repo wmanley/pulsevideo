@@ -22,8 +22,12 @@
 
 #include <stdint.h>
 
-/* A simple FD passing protocol.  Each message should have two file-descriptors
- * attached:
+/* The protocol between fdpay (in pulsevideo) and fddepay (in clients).  It's
+ * carried over a SOCK_SEQPACKET socket, so each message arrives as a single
+ * packet.  Every message starts with a PvMessage header, and its type says
+ * what follows:
+ *
+ * PV_MSG_FD_BUFFER: Just the header, with two file-descriptors attached:
  *
  * 1. A memfd (or file) which should be mmapable.  The data in the FD can
  *    be found at offset and is size bytes long.
@@ -46,20 +50,34 @@
  * receives a memfd with the same (st_dev, st_ino) as a memfd it has already
  * received, it reuses the GstMemory it created for the first memfd, avoiding
  * a costly remapping.
+ *
+ * PV_MSG_INLINE_BUFFER: The header is followed by size bytes of data, and no
+ * file-descriptors are attached.  For small buffers (up to
+ * PV_MSG_MAX_INLINE bytes, e.g. audio or encoded video) copying the data
+ * through the socket is cheaper than passing, mapping and tracking fds.
  */
 typedef struct {
+  /* PV_MSG_* */
+  uint32_t type;
+  /* PV_MSG_FLAG_* */
+  uint32_t flags;
   /* Time at which the frame was originally captured against the CLOCK_MONOTONIC
    * in ns */
   uint64_t capture_timestamp;
+  /* PV_MSG_FD_BUFFER only: offset of the data in the memfd */
   uint64_t offset;
   uint64_t size;
-  /* FD_MESSAGE_FLAG_* */
-  uint64_t flags;
-} FDMessage;
+} PvMessage;
 
-/* The memfd may be sent again in a later message (e.g. it's from a buffer
- * pool), so it's worth the receiver keeping it mapped.  If not set the memfd
- * is a one-off copy. */
-#define FD_MESSAGE_FLAG_MAY_REPEAT 1
+#define PV_MSG_FD_BUFFER 1
+#define PV_MSG_INLINE_BUFFER 2
+
+/* Buffers up to this size are sent inline */
+#define PV_MSG_MAX_INLINE (64 * 1024)
+
+/* PV_MSG_FD_BUFFER: The memfd may be sent again in a later message (it's from a
+ * buffer pool), so it's worth the receiver keeping it mapped.  If not set the
+ * memfd is a one-off. */
+#define PV_MSG_FLAG_MAY_REPEAT 1
 
 #endif

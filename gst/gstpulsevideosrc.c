@@ -34,6 +34,7 @@
 #include "glib_compat.h"
 #include "gstpulsevideosrc.h"
 #include "gstvideosource2.h"
+#include "tmpfile/wire-protocol.h"
 #include <string.h>
 #include <gio/gunixfdlist.h>
 #include <gst/base/gstbasesrc.h>
@@ -156,6 +157,9 @@ gst_pulsevideo_src_init (GstPulseVideoSrc * this)
   this->socketsrc = gst_element_factory_make ("pvsocketsrc", NULL);
   gst_base_src_set_live (GST_BASE_SRC (this->socketsrc), TRUE);
   gst_base_src_set_format (GST_BASE_SRC (this->socketsrc), GST_FORMAT_TIME);
+  /* Big enough for the largest message (see wire-protocol.h) */
+  gst_base_src_set_blocksize (GST_BASE_SRC (this->socketsrc),
+      sizeof (PvMessage) + PV_MSG_MAX_INLINE);
   gst_bin_add (GST_BIN (this), gst_object_ref (this->socketsrc));
   this->fddepay = gst_element_factory_make ("pvfddepay", NULL);
   gst_bin_add (GST_BIN (this), gst_object_ref (this->fddepay));
