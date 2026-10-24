@@ -45,11 +45,13 @@
  *
  * On the reciever side there is an element called fddepay.  This element
  * receives the memfd and the read end of the pipe.  It creates a GstFdMemory
- * which maps the memfd and keeps a mapping of (st_dev, st_ino) to the new
- * GstMemory.  It creates downstream buffers with the pipe attached.  If it
- * receives a memfd with the same (st_dev, st_ino) as a memfd it has already
- * received, it reuses the GstMemory it created for the first memfd, avoiding
- * a costly remapping.
+ * which maps the memfd and keeps a mapping of memory_id to the new GstMemory.
+ * It creates downstream buffers with the pipe attached.  If it receives a
+ * message with the same memory_id as one it has already received, it reuses
+ * the GstMemory it created for the first memfd, avoiding a costly remapping.
+ *
+ * The fd may also be a dma-buf, e.g. a buffer that a V4L2 driver captured
+ * into, exported with VIDIOC_EXPBUF.
  *
  * PV_MSG_INLINE_BUFFER: The header is followed by size bytes of data, and no
  * file-descriptors are attached.  For small buffers (up to
@@ -67,6 +69,16 @@ typedef struct {
   /* PV_MSG_FD_BUFFER only: offset of the data in the memfd */
   uint64_t offset;
   uint64_t size;
+  /* PV_MSG_FD_BUFFER with PV_MSG_FLAG_MAY_REPEAT only: identifies the memory
+   * the fd refers to.  A later message with the same memory_id refers to the
+   * same memory, so the receiver can reuse its mapping rather than mmapping
+   * the new fd.  The sender never reuses an id for different memory: they
+   * start from a random number in each process.
+   *
+   * We can't use the fd's (st_dev, st_ino) for this because on older kernels
+   * (including Linux 3.10 and 4.9) all dma-bufs share a single anonymous
+   * inode. */
+  uint64_t memory_id;
 } PvMessage;
 
 #define PV_MSG_FD_BUFFER 1

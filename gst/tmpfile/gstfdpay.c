@@ -434,6 +434,33 @@ gst_fdpay_is_raw (GstFdpay * fdpay)
   return raw;
 }
 
+G_LOCK_DEFINE_STATIC (next_memory_id);
+static guint64 next_memory_id;
+
+/* Returns mem's id for PvMessage.memory_id, giving it one if it doesn't have
+ * one yet */
+static guint64
+gst_fdpay_get_memory_id (GstMemory * mem)
+{
+  static GQuark quark;
+  guint64 *id;
+
+  if (G_UNLIKELY (quark == 0))
+    quark = g_quark_from_static_string ("gst-fdpay-memory-id");
+
+  id = gst_mini_object_get_qdata (GST_MINI_OBJECT_CAST (mem), quark);
+  if (id == NULL) {
+    id = g_new (guint64, 1);
+    G_LOCK (next_memory_id);
+    while (next_memory_id == 0)
+      next_memory_id = ((guint64) g_random_int () << 32) | g_random_int ();
+    *id = next_memory_id++;
+    G_UNLOCK (next_memory_id);
+    gst_mini_object_set_qdata (GST_MINI_OBJECT_CAST (mem), quark, id, g_free);
+  }
+  return *id;
+}
+
 /* Returns the fd memory to send and sets *hold to the buffer that we need to
  * keep alive until the receiver is done with it.  *may_repeat is set if the
  * memory belongs to a buffer pool, so we may send it again. */
@@ -565,6 +592,7 @@ gst_fdpay_transform (GstBaseTransform * trans, GstBuffer * inbuf,
   msg.size = fdmem->size;
   msg.flags = may_repeat ? PV_MSG_FLAG_MAY_REPEAT : 0;
   msg.offset = fdmem->offset;
+  msg.memory_id = may_repeat ? gst_fdpay_get_memory_id (fdmem) : 0;
 
   fdmsg = g_unix_fd_message_new ();
   if (!g_unix_fd_message_append_fd ((GUnixFDMessage*) fdmsg,
@@ -623,8 +651,9 @@ gst_fdpay_transform (GstBaseTransform * trans, GstBuffer * inbuf,
   GST_DEBUG_OBJECT (trans, "transform: Pushing {"
       "capture_timestamp: %" G_GUINT64_FORMAT ", "
       "offset: %" G_GUINT64_FORMAT ", "
-      "size: %" G_GUINT64_FORMAT "}", msg.capture_timestamp, msg.offset,
-      msg.size);
+      "size: %" G_GUINT64_FORMAT ", "
+      "memory_id: %" G_GUINT64_FORMAT "}", msg.capture_timestamp, msg.offset,
+      msg.size, msg.memory_id);
 
   return GST_FLOW_OK;
 append_pipe_fd_failed:
