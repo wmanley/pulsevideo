@@ -240,6 +240,7 @@ gst_fdpay_dispose (GObject * object)
     gst_buffer_pool_set_active (fdpay->copy_pool, FALSE);
     g_clear_object (&fdpay->copy_pool);
   }
+  g_clear_object (&fdpay->upstream_pool);
   g_mutex_clear (&fdpay->pipe_write_fds_lock);
 
   G_OBJECT_CLASS (gst_fdpay_parent_class)->dispose (object);
@@ -482,6 +483,63 @@ gst_fdpay_memory_get_fd (GstMemory * mem)
   return -1;
 }
 
+/* How many buffers from upstream's pool we leave for upstream: e.g. v4l2src
+ * needs some queued in the capture driver, and some are in flight between it
+ * and us (videorate holds on to the previous one). */
+#define UPSTREAM_POOL_RESERVE 6
+
+/* Returns TRUE if receivers are holding on to so many of the buffers from
+ * buffer's pool that upstream is at risk of running out, and sets *held to how
+ * many they are holding.
+ *
+ * We hold on to a buffer that we send zero-copy until every receiver is done
+ * with it.  Clients like stbt can hold on to lots of frames, and if upstream's
+ * pool has a maximum size it would then run out of buffers and stall.  That
+ * happens with v4l2src io-mode=dmabuf: GStreamer won't allocate more than
+ * VIDEO_MAX_FRAME (32) V4L2 buffers.  Pools without a maximum, like the one we
+ * propose upstream, just grow instead. */
+static gboolean
+gst_fdpay_upstream_pool_is_low (GstFdpay * fdpay, GstBuffer * buffer,
+    guint * held)
+{
+  GstBufferPool *pool = buffer->pool;
+  GHashTableIter iter;
+  gpointer value;
+  guint reserve;
+
+  *held = 0;
+  if (pool == NULL)
+    return FALSE;
+
+  if (pool != fdpay->upstream_pool) {
+    GstStructure *config = gst_buffer_pool_get_config (pool);
+    guint max_buffers = 0;
+
+    gst_buffer_pool_config_get_params (config, NULL, NULL, NULL, &max_buffers);
+    gst_structure_free (config);
+    gst_object_replace ((GstObject **) & fdpay->upstream_pool,
+        GST_OBJECT (pool));
+    fdpay->upstream_pool_max = max_buffers;
+    GST_DEBUG_OBJECT (fdpay, "Upstream pool %" GST_PTR_FORMAT " has "
+        "max_buffers=%u", pool, max_buffers);
+  }
+  if (fdpay->upstream_pool_max == 0)
+    return FALSE;
+
+  /* There's an entry for each buffer we've sent, however many receivers
+   * there are */
+  g_mutex_lock (&fdpay->pipe_write_fds_lock);
+  g_hash_table_iter_init (&iter, fdpay->pipe_write_fds);
+  while (g_hash_table_iter_next (&iter, NULL, &value)) {
+    if (((GstBuffer *) value)->pool == pool)
+      (*held)++;
+  }
+  g_mutex_unlock (&fdpay->pipe_write_fds_lock);
+
+  reserve = MIN (UPSTREAM_POOL_RESERVE, fdpay->upstream_pool_max / 2);
+  return *held + reserve >= fdpay->upstream_pool_max;
+}
+
 /* Returns the fd memory to send and sets *hold to the buffer that we need to
  * keep alive until the receiver is done with it.  *may_repeat is set if the
  * memory belongs to a buffer pool, so we may send it again. */
@@ -495,9 +553,26 @@ gst_fdpay_get_fd_memory (GstFdpay * fdpay, GstBuffer * buffer,
 
   if (gst_buffer_n_memory (buffer) == 1
       && gst_fdpay_memory_get_fd (gst_buffer_peek_memory (buffer, 0)) >= 0) {
-    *may_repeat = buffer->pool != NULL;
-    *hold = gst_buffer_ref (buffer);
-    return gst_buffer_get_memory (buffer, 0);
+    guint held;
+
+    if (!gst_fdpay_is_raw (fdpay)
+        || !gst_fdpay_upstream_pool_is_low (fdpay, buffer, &held)) {
+      if (fdpay->copying_upstream) {
+        GST_INFO_OBJECT (fdpay, "Receivers have released buffers from "
+            "upstream's pool: sending them without copying again");
+        fdpay->copying_upstream = FALSE;
+      }
+      *may_repeat = buffer->pool != NULL;
+      *hold = gst_buffer_ref (buffer);
+      return gst_buffer_get_memory (buffer, 0);
+    }
+
+    if (!fdpay->copying_upstream) {
+      GST_WARNING_OBJECT (fdpay, "Receivers are holding on to %u of the %u "
+          "buffers in upstream's pool: copying until they release some", held,
+          fdpay->upstream_pool_max);
+      fdpay->copying_upstream = TRUE;
+    }
   }
 
   GST_LOG_OBJECT (fdpay, "Buffer cannot be payloaded without copying");

@@ -586,6 +586,77 @@ GST_START_TEST (test_that_fddepay_holds_the_pipe_open_while_memory_is_in_use)
 
 GST_END_TEST
 
+/* From gsttmpfileallocator.h, which we can't include alongside
+ * <gst/allocators/gstdmabuf.h> */
+GstAllocator *gst_tmpfile_allocator_new (void);
+
+/* Receivers can hold on to buffers for as long as they like.  If upstream's
+ * pool has a maximum size (like v4l2src's) fdpay must start copying before it
+ * runs out, or upstream would stall. */
+GST_START_TEST (test_that_fdpay_copies_rather_than_exhausting_upstreams_pool)
+{
+  GstPipeline *pipeline;
+  GstAppSrc *appsrc;
+  GstAppSink *appsink;
+  GstBufferPool *pool;
+  GstAllocator *allocator;
+  GstStructure *config;
+  GstCaps *caps;
+  GstSample *held[16];
+  GstBufferPoolAcquireParams params = {.flags =
+        GST_BUFFER_POOL_ACQUIRE_FLAG_DONTWAIT };
+  /* Too big to be sent inline */
+  const gsize size = 320 * 320;
+  int i;
+
+  caps = gst_caps_from_string (
+      "video/x-raw,format=GRAY8,width=320,height=320,framerate=1/1");
+  pipeline = GST_PIPELINE (gst_parse_launch (
+      "appsrc name=src format=time ! pvfdpay ! appsink name=sink sync=false",
+      NULL));
+  appsrc = GST_APP_SRC (gst_bin_get_by_name (GST_BIN (pipeline), "src"));
+  appsink = GST_APP_SINK (gst_bin_get_by_name (GST_BIN (pipeline), "sink"));
+  gst_app_src_set_caps (appsrc, caps);
+
+  allocator = gst_tmpfile_allocator_new ();
+  pool = gst_buffer_pool_new ();
+  config = gst_buffer_pool_get_config (pool);
+  gst_buffer_pool_config_set_params (config, caps, size, 0, 8);
+  gst_buffer_pool_config_set_allocator (config, allocator, NULL);
+  fail_unless (gst_buffer_pool_set_config (pool, config));
+  fail_unless (gst_buffer_pool_set_active (pool, TRUE));
+
+  gst_element_set_state (GST_ELEMENT (pipeline), GST_STATE_PLAYING);
+
+  /* Hold on to everything that we receive, so fdpay can't release any of
+   * the buffers it sent without copying */
+  for (i = 0; i < G_N_ELEMENTS (held); i++) {
+    GstBuffer *buf = NULL;
+
+    fail_unless_equals_int (
+        gst_buffer_pool_acquire_buffer (pool, &buf, &params), GST_FLOW_OK);
+    gst_buffer_memset (buf, 0, i, size);
+    GST_BUFFER_PTS (buf) = i * GST_SECOND;
+    fail_unless_equals_int (gst_app_src_push_buffer (appsrc, buf),
+        GST_FLOW_OK);
+    held[i] = gst_app_sink_pull_sample (appsink);
+    fail_unless (held[i] != NULL);
+  }
+
+  for (i = 0; i < G_N_ELEMENTS (held); i++)
+    gst_sample_unref (held[i]);
+  gst_element_set_state (GST_ELEMENT (pipeline), GST_STATE_NULL);
+  gst_buffer_pool_set_active (pool, FALSE);
+  gst_object_unref (pool);
+  gst_object_unref (allocator);
+  gst_caps_unref (caps);
+  gst_object_unref (appsrc);
+  gst_object_unref (appsink);
+  gst_object_unref (pipeline);
+}
+
+GST_END_TEST
+
 GST_START_TEST (test_that_buffers_from_fddepay_are_read_only)
 {
   GstPipeline * pipeline;
@@ -643,6 +714,8 @@ socketintegrationtest_suite (void)
       test_that_fdpay_sends_dmabufs_without_copying);
   tcase_add_test (tc_chain,
       test_that_buffers_from_fddepay_are_read_only);
+  tcase_add_test (tc_chain,
+      test_that_fdpay_copies_rather_than_exhausting_upstreams_pool);
   tcase_add_test (tc_chain,
       test_that_fddepay_holds_the_pipe_open_while_memory_is_in_use);
 

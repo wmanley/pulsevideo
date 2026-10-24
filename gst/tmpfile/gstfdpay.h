@@ -50,6 +50,14 @@ struct _GstFdpay
    * them mapped. */
   GstBufferPool *copy_pool;
   gsize copy_pool_size;
+
+  /* The pool our input buffers come from, and its maximum size.  See
+   * gst_fdpay_upstream_pool_is_low. */
+  GstBufferPool *upstream_pool;
+  guint upstream_pool_max;
+  /* Whether we're copying input buffers into copy_pool because receivers are
+   * holding too many from upstream_pool */
+  gboolean copying_upstream;
 };
 
 struct _GstFdpayClass
