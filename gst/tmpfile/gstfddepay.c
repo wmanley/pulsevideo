@@ -447,6 +447,13 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
       msg.size, (msg.flags & PV_MSG_FLAG_MAY_REPEAT) ? msg.memory_id : 0);
   fd = -1;
 
+  /* Close the pipe, telling the sender we're done with the data, when the
+   * memory is freed.  fdmem is new for each message, so that's when nothing
+   * refers to this frame any more, even shallow copies of buf. */
+  gst_mini_object_set_qdata (GST_MINI_OBJECT_CAST (fdmem), pipe_read_fd_quark,
+      GINT_TO_POINTER (pipe_read_fd), gst_fddepay_close_pipe_fd);
+  pipe_read_fd = -1;
+
   gst_buffer_remove_all_memory (buf);
   gst_buffer_remove_meta (buf,
       gst_buffer_get_meta (buf, GST_NET_CONTROL_MESSAGE_META_API_TYPE));
@@ -454,12 +461,6 @@ gst_fddepay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
   fdmem = NULL;
 
   gst_fddepay_set_pts (fddepay, buf, msg.capture_timestamp);
-
-  /* Attach pipe_read_fd to buffer so it gets closed when buffer is destroyed */
-  if (pipe_read_fd >= 0) {
-    gst_mini_object_set_qdata (GST_MINI_OBJECT_CAST (buf), pipe_read_fd_quark,
-        GINT_TO_POINTER (pipe_read_fd), gst_fddepay_close_pipe_fd);
-  }
 
   return GST_FLOW_OK;
 error:

@@ -551,6 +551,41 @@ GST_START_TEST (test_that_fdpay_sends_dmabufs_without_copying)
 
 GST_END_TEST
 
+/* fddepay tells fdpay that it's done with a buffer by closing a pipe.  It mustn't
+ * do that while anything still refers to the memory: e.g. elements that make a
+ * buffer writable get a shallow copy that shares the memory with the original,
+ * and drop the original. */
+GST_START_TEST (test_that_fddepay_holds_the_pipe_open_while_memory_is_in_use)
+{
+  GstPipeline *pipeline;
+  GstSample *sample;
+  GstBuffer *big, *copy;
+  gsize fds_with_copy;
+
+  pipeline = GST_PIPELINE (gst_parse_launch (
+      "appsrc name=src caps=application/x-gst-check "
+      "! pvfdpay "
+      "! pvfddepay "
+      "! appsink name=sink caps=application/x-gst-check", NULL));
+  /* Too big to be sent inline */
+  big = gst_buffer_new_allocate (NULL, PV_MSG_MAX_INLINE + 1, NULL);
+  gst_buffer_memset (big, 0, 'x', PV_MSG_MAX_INLINE + 1);
+  sample = send_buffer_through_pipeline (pipeline, big);
+
+  copy = gst_buffer_copy (gst_sample_get_buffer (sample));
+  gst_sample_unref (sample);
+  /* appsink holds on to the sample until it's freed */
+  g_clear_object (&pipeline);
+
+  /* The original buffer is gone, but we're still using its memory, so the
+   * memfd and the read end of the pipe should both still be open */
+  fds_with_copy = count_fds ();
+  gst_buffer_unref (copy);
+  fail_unless_equals_int (count_fds (), fds_with_copy - 2);
+}
+
+GST_END_TEST
+
 GST_START_TEST (test_that_buffers_from_fddepay_are_read_only)
 {
   GstPipeline * pipeline;
@@ -608,6 +643,8 @@ socketintegrationtest_suite (void)
       test_that_fdpay_sends_dmabufs_without_copying);
   tcase_add_test (tc_chain,
       test_that_buffers_from_fddepay_are_read_only);
+  tcase_add_test (tc_chain,
+      test_that_fddepay_holds_the_pipe_open_while_memory_is_in_use);
 
   return s;
 }
