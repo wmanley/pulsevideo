@@ -18,6 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
+#define _GNU_SOURCE /* for memfd_create */
 #include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
@@ -26,6 +27,7 @@
 #include <gst/check/gstcheck.h>
 #include <gst/app/gstappsink.h>
 #include <gst/app/gstappsrc.h>
+#include <gst/allocators/gstdmabuf.h>
 #include <gio/gunixfdmessage.h>
 #include "../build/gstnetcontrolmessagemeta.h"
 #include "../build/tmpfile/wire-protocol.h"
@@ -33,6 +35,7 @@
 #include "sys/types.h"
 #include "sys/stat.h"
 #include "fcntl.h"
+#include <sys/mman.h>
 
 #define GST_UNREF(x) \
   do { \
@@ -490,6 +493,64 @@ GST_START_TEST (test_that_fdpay_attaches_a_monotonic_timestamp)
 
 GST_END_TEST
 
+/* e.g. from v4l2src io-mode=dmabuf.  pulsevideo has its own copy of
+ * GstFdMemory, so these aren't "fd memory" as far as it's concerned. */
+GST_START_TEST (test_that_fdpay_sends_dmabufs_without_copying)
+{
+  GstPipeline *pipeline;
+  GstAllocator *dmabuf_allocator;
+  GstSample *sample;
+  GstBuffer *buf;
+  GSocketControlMessage *msg;
+  PvMessage header;
+  gint *fds, fds_len = 0;
+  struct stat stat_orig, stat_new;
+  gsize size = PV_MSG_MAX_INLINE * 2;
+  int fd;
+
+  fd = memfd_create ("test", MFD_CLOEXEC);
+  fail_unless (fd >= 0);
+  fail_unless (ftruncate (fd, size) == 0);
+  fail_unless (fstat (fd, &stat_orig) == 0);
+
+  dmabuf_allocator = gst_dmabuf_allocator_new ();
+  buf = gst_buffer_new ();
+  gst_buffer_append_memory (buf,
+      gst_dmabuf_allocator_alloc (dmabuf_allocator, dup (fd), size));
+  gst_object_unref (dmabuf_allocator);
+
+  pipeline = GST_PIPELINE (gst_parse_launch (
+      "appsrc name=src caps=application/x-gst-check "
+      "! pvfdpay "
+      "! appsink name=sink", NULL));
+  sample = send_buffer_through_pipeline (pipeline, buf);
+  g_clear_object (&pipeline);
+
+  buf = gst_sample_get_buffer (sample);
+  fail_unless_equals_uint64 (gst_buffer_get_size (buf), sizeof (header));
+  gst_buffer_extract (buf, 0, &header, sizeof (header));
+  fail_unless_equals_int (header.type, PV_MSG_FD_BUFFER);
+  fail_unless_equals_uint64 (header.size, size);
+
+  msg = ((GstNetControlMessageMeta*) gst_buffer_get_meta (
+      buf, GST_NET_CONTROL_MESSAGE_META_API_TYPE))->message;
+  fds = g_unix_fd_message_steal_fds ((GUnixFDMessage*) msg, &fds_len);
+  fail_unless_equals_int (fds_len, 2);
+
+  /* It's the file we sent rather than a copy */
+  fail_unless (fstat (fds[0], &stat_new) == 0);
+  fail_unless (stat_orig.st_dev == stat_new.st_dev);
+  fail_unless (stat_orig.st_ino == stat_new.st_ino);
+
+  close (fds[0]);
+  close (fds[1]);
+  g_free (fds);
+  gst_sample_unref (sample);
+  close (fd);
+}
+
+GST_END_TEST
+
 GST_START_TEST (test_that_buffers_from_fddepay_are_read_only)
 {
   GstPipeline * pipeline;
@@ -543,6 +604,8 @@ socketintegrationtest_suite (void)
       test_that_we_can_provide_new_socketsrc_sockets_during_signal);
   tcase_add_test (tc_chain,
       test_that_fdpay_attaches_a_monotonic_timestamp);
+  tcase_add_test (tc_chain,
+      test_that_fdpay_sends_dmabufs_without_copying);
   tcase_add_test (tc_chain,
       test_that_buffers_from_fddepay_are_read_only);
 

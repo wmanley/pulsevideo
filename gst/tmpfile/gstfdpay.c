@@ -461,6 +461,27 @@ gst_fdpay_get_memory_id (GstMemory * mem)
   return *id;
 }
 
+/* Returns the fd behind mem, or -1 if it isn't backed by one.
+ *
+ * pulsevideo has its own copy of GstFdMemory (see the Makefile), so
+ * gst_is_fd_memory only recognises memory from our own allocators.  We also
+ * accept dma-bufs from GStreamer's GstDmaBufAllocator, which is what v4l2src
+ * io-mode=dmabuf produces. */
+/* From libgstallocators' <gst/allocators/gstdmabuf.h>.  We can't include that
+ * because its macros clash with our copy of gstfdmemory.h. */
+gboolean gst_is_dmabuf_memory (GstMemory * mem);
+gint gst_dmabuf_memory_get_fd (GstMemory * mem);
+
+static int
+gst_fdpay_memory_get_fd (GstMemory * mem)
+{
+  if (gst_is_fd_memory (mem))
+    return gst_fd_memory_get_fd (mem);
+  if (gst_is_dmabuf_memory (mem))
+    return gst_dmabuf_memory_get_fd (mem);
+  return -1;
+}
+
 /* Returns the fd memory to send and sets *hold to the buffer that we need to
  * keep alive until the receiver is done with it.  *may_repeat is set if the
  * memory belongs to a buffer pool, so we may send it again. */
@@ -473,7 +494,7 @@ gst_fdpay_get_fd_memory (GstFdpay * fdpay, GstBuffer * buffer,
   GstBuffer *copy;
 
   if (gst_buffer_n_memory (buffer) == 1
-      && gst_is_fd_memory (gst_buffer_peek_memory (buffer, 0))) {
+      && gst_fdpay_memory_get_fd (gst_buffer_peek_memory (buffer, 0)) >= 0) {
     *may_repeat = buffer->pool != NULL;
     *hold = gst_buffer_ref (buffer);
     return gst_buffer_get_memory (buffer, 0);
@@ -596,7 +617,7 @@ gst_fdpay_transform (GstBaseTransform * trans, GstBuffer * inbuf,
 
   fdmsg = g_unix_fd_message_new ();
   if (!g_unix_fd_message_append_fd ((GUnixFDMessage*) fdmsg,
-          gst_fd_memory_get_fd (fdmem), &err)) {
+          gst_fdpay_memory_get_fd (fdmem), &err)) {
     goto append_fd_failed;
   }
   gst_memory_unref(fdmem);
