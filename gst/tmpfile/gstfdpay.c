@@ -299,9 +299,12 @@ gst_fdpay_get_fd_memory (GstFdpay * tmpfilepay, GstBuffer * buffer)
   GstMemory *out = NULL;
 
   if (gst_buffer_n_memory (buffer) == 1
-      && gst_is_fd_memory (gst_buffer_peek_memory (buffer, 0)))
+      && gst_is_fd_memory (gst_buffer_peek_memory (buffer, 0))) {
     out = gst_buffer_get_memory (buffer, 0);
-  else {
+    /* The fd is about to escape this process, so the memory must never be
+     * reused.  This makes the buffer pool discard the buffer on release. */
+    GST_BUFFER_FLAG_SET (buffer, GST_BUFFER_FLAG_TAG_MEMORY);
+  } else {
     GstMapInfo src_info;
     GST_INFO_OBJECT (tmpfilepay, "Buffer cannot be payloaded without copying");
     if (!gst_buffer_map (buffer, &src_info, GST_MAP_READ)) {
@@ -339,10 +342,6 @@ gst_fdpay_transform (GstBaseTransform * trans, GstBuffer * inbuf,
     GST_ERROR_OBJECT (fdpay, "Failed to get fd memory for buffer");
     return GST_FLOW_ERROR;
   }
-  /* Our fd may escape this process, so the memory must never be reused.  This
-   * makes the buffer pool discard the buffer on release. */
-  if (gst_buffer_is_writable (inbuf))
-    GST_BUFFER_FLAG_SET (inbuf, GST_BUFFER_FLAG_TAG_MEMORY);
 
   msg.size = fdmem->size;
   msg.offset = fdmem->offset;
