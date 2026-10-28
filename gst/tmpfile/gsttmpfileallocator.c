@@ -55,7 +55,7 @@ G_DEFINE_TYPE (GstTmpFileAllocator, gst_tmpfile_allocator, GST_TYPE_ALLOCATOR);
 static int
 tmpfile_create (GstTmpFileAllocator * allocator)
 {
-  char filename[] = "/dev/shm/gsttmpfilepay.PPPPP.NNNNNNNNNN.XXXXXX";
+  char filename[256];
   int fd;
 
   /* This should not be strictly necessary, but it can be useful to know more
