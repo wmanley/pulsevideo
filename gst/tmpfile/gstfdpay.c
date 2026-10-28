@@ -78,8 +78,11 @@ static GstCaps *gst_fdpay_transform_caps (GstBaseTransform * trans,
     GstPadDirection direction, GstCaps * caps, GstCaps * filter);
 static gboolean gst_fdpay_propose_allocation (GstBaseTransform * trans,
     GstQuery * decide_query, GstQuery * query);
-static GstFlowReturn gst_fdpay_transform_ip (GstBaseTransform * trans,
-    GstBuffer * buf);
+static gboolean gst_fdpay_transform_size (GstBaseTransform * trans,
+    GstPadDirection direction, GstCaps * caps, gsize size, GstCaps * othercaps,
+    gsize * othersize);
+static GstFlowReturn gst_fdpay_transform (GstBaseTransform * trans,
+    GstBuffer * inbuf, GstBuffer * outbuf);
 
 /* pad templates */
 
@@ -128,10 +131,12 @@ gst_fdpay_class_init (GstFdpayClass * klass)
   gst_element_class->set_clock = GST_DEBUG_FUNCPTR (gst_fdpay_set_clock);
   base_transform_class->transform_caps =
       GST_DEBUG_FUNCPTR (gst_fdpay_transform_caps);
+  base_transform_class->transform_size =
+      GST_DEBUG_FUNCPTR (gst_fdpay_transform_size);
   base_transform_class->propose_allocation =
       GST_DEBUG_FUNCPTR (gst_fdpay_propose_allocation);
-  base_transform_class->transform_ip =
-      GST_DEBUG_FUNCPTR (gst_fdpay_transform_ip);
+  base_transform_class->transform =
+      GST_DEBUG_FUNCPTR (gst_fdpay_transform);
 }
 
 static void
@@ -186,6 +191,18 @@ gst_fdpay_transform_caps (GstBaseTransform * trans, GstPadDirection direction,
     return intersect;
   } else {
     return othercaps;
+  }
+}
+
+static gboolean
+gst_fdpay_transform_size (GstBaseTransform * trans, GstPadDirection direction,
+    GstCaps * caps, gsize size, GstCaps * othercaps, gsize * othersize)
+{
+  if (direction == GST_PAD_SINK) {
+    *othersize = sizeof (FDMessage);
+    return TRUE;
+  } else {
+    return FALSE;
   }
 }
 
@@ -304,26 +321,28 @@ out:
 }
 
 static GstFlowReturn
-gst_fdpay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
+gst_fdpay_transform (GstBaseTransform * trans, GstBuffer * inbuf,
+    GstBuffer * outbuf)
 {
   GstFdpay *fdpay = GST_FDPAY (trans);
-  GstAllocator *downstream_allocator = NULL;
   GstMemory *fdmem = NULL;
-  GstMemory *msgmem;
   GstMapInfo info;
   GError *err = NULL;
   GSocketControlMessage *fdmsg = NULL;
   FDMessage msg = { 0, 0, 0 };
   GstClockTime pipeline_clock_time;
 
-  GST_DEBUG_OBJECT (fdpay, "transform_ip");
+  GST_DEBUG_OBJECT (fdpay, "transform");
 
-  fdmem = gst_fdpay_get_fd_memory (fdpay, buf);
+  fdmem = gst_fdpay_get_fd_memory (fdpay, inbuf);
   if (fdmem == NULL) {
     GST_ERROR_OBJECT (fdpay, "Failed to get fd memory for buffer");
     return GST_FLOW_ERROR;
   }
-  gst_buffer_remove_all_memory (buf);
+  /* Our fd may escape this process, so the memory must never be reused.  This
+   * makes the buffer pool discard the buffer on release. */
+  if (gst_buffer_is_writable (inbuf))
+    GST_BUFFER_FLAG_SET (inbuf, GST_BUFFER_FLAG_TAG_MEMORY);
 
   msg.size = fdmem->size;
   msg.offset = fdmem->offset;
@@ -336,17 +355,14 @@ gst_fdpay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
   gst_memory_unref(fdmem);
   fdmem = NULL;
 
-  gst_buffer_add_net_control_message_meta (buf, fdmsg);
+  gst_buffer_add_net_control_message_meta (outbuf, fdmsg);
   g_clear_object (&fdmsg);
 
-  gst_base_transform_get_allocator (trans, &downstream_allocator, NULL);
-  msgmem = gst_allocator_alloc (downstream_allocator, sizeof (FDMessage), NULL);
-
   if (trans->segment.format == GST_FORMAT_TIME &&
-      GST_CLOCK_TIME_IS_VALID (GST_BUFFER_PTS (buf))) {
+      GST_CLOCK_TIME_IS_VALID (GST_BUFFER_PTS (inbuf))) {
     pipeline_clock_time = GST_ELEMENT (trans)->base_time +
         gst_segment_to_running_time (
-            &trans->segment, GST_FORMAT_TIME, GST_BUFFER_PTS (buf));
+            &trans->segment, GST_FORMAT_TIME, GST_BUFFER_PTS (inbuf));
     GST_OBJECT_LOCK (fdpay->monotonic_clock);
     msg.capture_timestamp = gst_clock_unadjust_unlocked (
         fdpay->monotonic_clock, pipeline_clock_time);
@@ -354,20 +370,19 @@ gst_fdpay_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
   } else {
     msg.capture_timestamp = 0;
   }
-  gst_memory_map (msgmem, &info, GST_MAP_WRITE);
+  if (!gst_buffer_map (outbuf, &info, GST_MAP_WRITE)) {
+    GST_ERROR_OBJECT (fdpay, "Failed to map output buffer");
+    return GST_FLOW_ERROR;
+  }
   memcpy (info.data, &msg, sizeof (msg));
-  gst_memory_unmap (msgmem, &info);
-  GST_UNREF (downstream_allocator);
-
-  gst_buffer_append_memory (buf, msgmem);
-  msgmem = NULL;
+  gst_buffer_unmap (outbuf, &info);
 
   static struct FaultInjectionPoint fdpay_buffer = FAULT_INJECTION_POINT("fdpay_buffer");
   if (!inject_fault (&fdpay_buffer, NULL)) {
     return GST_FLOW_ERROR;
   }
 
-  GST_DEBUG_OBJECT (trans, "transform_ip: Pushing {"
+  GST_DEBUG_OBJECT (trans, "transform: Pushing {"
       "capture_timestamp: %" G_GUINT64_FORMAT ", "
       "offset: %" G_GUINT64_FORMAT ", "
       "size: %" G_GUINT64_FORMAT "}", msg.capture_timestamp, msg.offset,
