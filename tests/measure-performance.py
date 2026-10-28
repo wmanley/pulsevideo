@@ -1,6 +1,4 @@
-#!/usr/bin/python
-
-from __future__ import division, unicode_literals
+#!/usr/bin/python3
 
 import argparse
 import os
@@ -15,7 +13,8 @@ def main(argv):
     parser.parse_args(argv[1:])
 
     subprocess.check_call(['make'], stdout=sys.stderr)
-    version = subprocess.check_output(['git', 'describe', '--always']).strip()
+    version = subprocess.check_output(
+        ['git', 'describe', '--always'], universal_newlines=True).strip()
 
     env = dict(os.environ)
     env['GST_PLUGIN_PATH'] = os.path.abspath('build')
@@ -38,14 +37,14 @@ def main(argv):
     assert pv_info.state == 'Z'
     assert client_info.state == 'Z'
 
-    ticks_per_second = os.sysconf(b'SC_CLK_TCK')
+    ticks_per_second = os.sysconf('SC_CLK_TCK')
 
-    print "%s %f %f %f %f" % (
+    print("%s %f %f %f %f" % (
         version,
         pv_info.stime / ticks_per_second,
         pv_info.utime / ticks_per_second,
         client_info.stime / ticks_per_second,
-        client_info.utime / ticks_per_second)
+        client_info.utime / ticks_per_second))
 
     return 0
 
@@ -65,7 +64,7 @@ StatData = namedtuple("StatData", STAT_FIELDS)
 def read_stat_info(pid):
     with open('/proc/%i/stat' % pid) as f:
         statinfo = f.read().split()
-    for n in [0] + range(3, len(STAT_FIELDS)):
+    for n in [0] + list(range(3, len(STAT_FIELDS))):
         statinfo[n] = int(statinfo[n])
     return StatData(*statinfo)
 
