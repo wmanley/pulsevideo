@@ -493,6 +493,50 @@ GST_START_TEST (test_that_fdpay_attaches_a_monotonic_timestamp)
 
 GST_END_TEST
 
+/* With a CLOCK_MONOTONIC pipeline clock the conversion from PTS to
+ * CLOCK_MONOTONIC should be exact, honouring the clock's calibration.  Going
+ * via a slaved clock would only approximate it.  The calibration here runs
+ * at half speed so that the conversion isn't simply the identity. */
+GST_START_TEST (test_that_fdpay_converts_exactly_with_a_monotonic_clock)
+{
+  GstClock *clock;
+  GstPipeline *pipeline;
+  GstSample *sample;
+  GstBuffer *buf;
+  PvMessage header;
+  GstClockTime expected;
+
+  clock = g_object_new (GST_TYPE_SYSTEM_CLOCK,
+      "clock-type", GST_CLOCK_TYPE_MONOTONIC, NULL);
+  gst_clock_set_calibration (clock, gst_clock_get_internal_time (clock),
+      1000 * GST_SECOND, 1, 2);
+
+  pipeline = GST_PIPELINE (gst_parse_launch (
+      "appsrc name=src format=GST_FORMAT_TIME is-live=true caps=application/x-gst-check "
+      "! pvfdpay "
+      "! appsink name=sink sync=false async=true", NULL));
+  gst_pipeline_use_clock (pipeline, clock);
+
+  buf = gst_buffer_new_wrapped (g_strdup ("hello"), 5);
+  GST_BUFFER_PTS (buf) = GST_SECOND;
+  sample = send_buffer_through_pipeline (pipeline, buf);
+
+  GST_OBJECT_LOCK (clock);
+  expected = gst_clock_unadjust_unlocked (clock,
+      gst_element_get_base_time (GST_ELEMENT (pipeline)) + GST_SECOND);
+  GST_OBJECT_UNLOCK (clock);
+
+  gst_buffer_extract (gst_sample_get_buffer (sample), 0, &header,
+      sizeof (header));
+  fail_unless_equals_uint64 (header.capture_timestamp, expected);
+
+  gst_sample_unref (sample);
+  g_clear_object (&pipeline);
+  g_clear_object (&clock);
+}
+
+GST_END_TEST
+
 /* e.g. from v4l2src io-mode=dmabuf.  pulsevideo has its own copy of
  * GstFdMemory, so these aren't "fd memory" as far as it's concerned. */
 GST_START_TEST (test_that_fdpay_sends_dmabufs_without_copying)
@@ -710,6 +754,8 @@ socketintegrationtest_suite (void)
       test_that_we_can_provide_new_socketsrc_sockets_during_signal);
   tcase_add_test (tc_chain,
       test_that_fdpay_attaches_a_monotonic_timestamp);
+  tcase_add_test (tc_chain,
+      test_that_fdpay_converts_exactly_with_a_monotonic_clock);
   tcase_add_test (tc_chain,
       test_that_fdpay_sends_dmabufs_without_copying);
   tcase_add_test (tc_chain,

@@ -600,12 +600,26 @@ gst_fdpay_get_fd_memory (GstFdpay * fdpay, GstBuffer * buffer,
   return out;
 }
 
+/* Whether @clock's internal time is CLOCK_MONOTONIC */
+static gboolean
+clock_is_monotonic (GstClock * clock)
+{
+  GstClockType clock_type;
+
+  if (!GST_IS_SYSTEM_CLOCK (clock))
+    return FALSE;
+
+  g_object_get (clock, "clock-type", &clock_type, NULL);
+  return clock_type == GST_CLOCK_TYPE_MONOTONIC;
+}
+
 /* The time at which inbuf was captured against CLOCK_MONOTONIC */
 static guint64
 gst_fdpay_capture_timestamp (GstFdpay * fdpay, GstBuffer * inbuf)
 {
   GstBaseTransform *trans = GST_BASE_TRANSFORM (fdpay);
   GstClockTime pipeline_clock_time;
+  GstClock *clock;
   guint64 ts;
 
   if (trans->segment.format != GST_FORMAT_TIME ||
@@ -615,10 +629,23 @@ gst_fdpay_capture_timestamp (GstFdpay * fdpay, GstBuffer * inbuf)
   pipeline_clock_time = GST_ELEMENT (trans)->base_time +
       gst_segment_to_running_time (
           &trans->segment, GST_FORMAT_TIME, GST_BUFFER_PTS (inbuf));
-  GST_OBJECT_LOCK (fdpay->monotonic_clock);
-  ts = gst_clock_unadjust_unlocked (fdpay->monotonic_clock,
-      pipeline_clock_time);
-  GST_OBJECT_UNLOCK (fdpay->monotonic_clock);
+
+  /* If the pipeline clock is CLOCK_MONOTONIC the conversion is exact: just
+   * undo its calibration.  Otherwise go via our CLOCK_MONOTONIC clock, which
+   * is slaved to it. */
+  clock = gst_element_get_clock (GST_ELEMENT (fdpay));
+  if (clock && clock_is_monotonic (clock)) {
+    GST_OBJECT_LOCK (clock);
+    ts = gst_clock_unadjust_unlocked (clock, pipeline_clock_time);
+    GST_OBJECT_UNLOCK (clock);
+  } else {
+    GST_OBJECT_LOCK (fdpay->monotonic_clock);
+    ts = gst_clock_unadjust_unlocked (fdpay->monotonic_clock,
+        pipeline_clock_time);
+    GST_OBJECT_UNLOCK (fdpay->monotonic_clock);
+  }
+  if (clock)
+    gst_object_unref (clock);
   return ts;
 }
 
