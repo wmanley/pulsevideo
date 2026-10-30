@@ -470,6 +470,49 @@ check_monotonic_timestamp_with_clock(GstClock * clock)
   fail_unless (header[2] == 5);  /* size */
 }
 
+/* With a CLOCK_MONOTONIC pipeline clock the conversion from PTS to
+ * CLOCK_MONOTONIC should be exact, honouring the clock's calibration.  Going
+ * via a slaved clock would only approximate it.  The calibration here runs
+ * at half speed so that the conversion isn't simply the identity. */
+GST_START_TEST (test_that_fdpay_converts_exactly_with_a_monotonic_clock)
+{
+  GstClock *clock;
+  GstPipeline *pipeline;
+  GstSample *sample;
+  GstBuffer *buf;
+  guint64 header[3];
+  GstClockTime expected;
+
+  clock = g_object_new (GST_TYPE_SYSTEM_CLOCK,
+      "clock-type", GST_CLOCK_TYPE_MONOTONIC, NULL);
+  gst_clock_set_calibration (clock, gst_clock_get_internal_time (clock),
+      1000 * GST_SECOND, 1, 2);
+
+  pipeline = GST_PIPELINE (gst_parse_launch (
+      "appsrc name=src format=GST_FORMAT_TIME is-live=true "
+      "! pvfdpay "
+      "! appsink name=sink sync=false async=true", NULL));
+  gst_pipeline_use_clock (pipeline, clock);
+
+  buf = gst_buffer_new_wrapped (g_strdup ("hello"), 5);
+  GST_BUFFER_PTS (buf) = GST_SECOND;
+  sample = send_buffer_through_pipeline (pipeline, buf);
+
+  GST_OBJECT_LOCK (clock);
+  expected = gst_clock_unadjust_unlocked (clock,
+      gst_element_get_base_time (GST_ELEMENT (pipeline)) + GST_SECOND);
+  GST_OBJECT_UNLOCK (clock);
+
+  gst_buffer_extract (gst_sample_get_buffer (sample), 0, header, 8 * 3);
+  fail_unless_equals_uint64 (header[0], expected);
+
+  gst_sample_unref (sample);
+  g_clear_object (&pipeline);
+  g_clear_object (&clock);
+}
+
+GST_END_TEST
+
 GST_START_TEST (test_that_fdpay_attaches_a_monotonic_timestamp)
 {
   GstClock * clock = NULL;
@@ -530,6 +573,8 @@ socketintegrationtest_suite (void)
       test_that_we_can_provide_new_socketsrc_sockets_during_signal);
   tcase_add_test (tc_chain,
       test_that_fdpay_attaches_a_monotonic_timestamp);
+  tcase_add_test (tc_chain,
+      test_that_fdpay_converts_exactly_with_a_monotonic_clock);
   tcase_add_test (tc_chain,
       test_that_buffers_from_fddepay_are_read_only);
 
